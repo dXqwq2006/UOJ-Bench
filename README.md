@@ -14,7 +14,7 @@ Located in `dataset/` directory:
 - `problems.json` - Problem statements from UOJ
 - `hacks.json` - Incorrect code samples for hack testing (Hard version)
 - `small_submission_pairs.json` - Hard version dataset of similar code pairs for debugging
-- `large_submission_pairs.json` - Easy version dataset of similar code pairs for debugging and hack testing
+- `sampled_large_submission_pairs.json` - Easy version dataset of similar code pairs for debugging and hack testing
 - `sampled_ac_submissions.json` - Some ac submissions of uoj (open hack task)
 - `sampled_*.json` - Sampled versions of the above datasets
 
