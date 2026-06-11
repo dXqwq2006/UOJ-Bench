@@ -1,8 +1,12 @@
-## Leaderboard
+## Leaderboard & API Application
 
 Interactive results for all models and tasks:
 
 **[https://xtqqwq.github.io/UOJ-Bench/](https://xtqqwq.github.io/UOJ-Bench/)**
+
+API application link:
+
+**[https://uoj.ac/api-application](https://uoj.ac/api-application)**
 
 ## Directory Structure
 
