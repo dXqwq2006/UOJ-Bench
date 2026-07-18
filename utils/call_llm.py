@@ -1,49 +1,395 @@
-import requests
-import json
-import os
-import openai
+"""Small HTTP adapters for the model endpoints used by UOJ-Bench."""
 
-__all__ = ['call_llm_details', 'call_llm_full', 'call_llm']
+from __future__ import annotations
+
+import copy
+import math
+import os
+from typing import Any
+from urllib.parse import quote
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+__all__ = [
+    "assistant_history_message",
+    "call_llm",
+    "call_llm_details",
+    "call_llm_full",
+    "generate_messages",
+]
+
+TATU_MODELS = {
+    "gemini-3.1-pro-preview": "gemini",
+    "gpt-5.5": "openai",
+    "gpt-5.6-sol": "openai",
+    "claude-fable-5": "anthropic",
+}
+
+openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+
 
 def generate_messages(message):
     if isinstance(message, str):
-        return [
-            {
-                "role": "user",
-                "content": message
-            }
-        ]
-    return message
+        return [{"role": "user", "content": message}]
+    if not isinstance(message, list):
+        raise TypeError("message must be a string or message list")
+    return copy.deepcopy(message)
+
+
+def _redact(value: Any, secret: str | None) -> Any:
+    """Return response data safe to persist in benchmark artifacts."""
+    if isinstance(value, dict):
+        return {key: _redact(item, secret) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact(item, secret) for item in value]
+    if isinstance(value, str) and secret:
+        return value.replace(secret, "<redacted>")
+    return copy.deepcopy(value)
+
 
 def call_api(message, model, url, api_key):
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": model,  # You can change the model
-        "messages": generate_messages(message)
-    }
-    response = requests.post(url, headers=headers, json=payload)
-    response.raise_for_status()  # Raise exception for error status codes
-    return response.json()
+    """Keep the original OpenRouter request contract."""
+    response = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        json={"model": model, "messages": generate_messages(message)},
+    )
+    response.raise_for_status()
+    return _redact(response.json(), api_key)
 
-openrouter_api_key = os.environ.get('OPENROUTER_KEY')
-openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
+
 def call_openrouter(message, model="openai/gpt-oss-120b"):
-    return call_api(message, model, openrouter_url, openrouter_api_key)
+    return call_api(message, model, openrouter_url, os.environ.get("OPENROUTER_KEY"))
+
+
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    return min(maximum, max(minimum, value))
+
+
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return min(maximum, max(minimum, value))
+
+
+def _tatu_settings() -> tuple[str, str, int]:
+    key = os.environ.get("TATU_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("TATU_API_KEY is required")
+    base = os.environ.get("TATU_BASE_URL", "https://maas.tatucloud.com/v1").rstrip("/")
+    max_tokens = _env_int("TATU_MAX_OUTPUT_TOKENS", 65536, 1, 65536)
+    return key, base, max_tokens
+
+
+def _post(url: str, headers: dict[str, str], payload: dict[str, Any], secret: str) -> dict[str, Any]:
+    retry = Retry(
+        total=_env_int("TATU_MAX_RETRIES", 3, 0, 5),
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"POST"}),
+        respect_retry_after_header=True,
+    )
+    with requests.Session() as session:
+        session.mount("https://", HTTPAdapter(max_retries=retry))
+        response = session.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=_env_float("TATU_TIMEOUT_SECONDS", 900, 1, 900),
+        )
+    response.raise_for_status()
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError("TATU returned non-object JSON")
+    return _redact(data, secret)
+
+
+def _text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            part.get("text", "")
+            for part in value
+            if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
+    return "" if value is None else str(value)
+
+
+def _openai_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    messages = []
+    for item in history:
+        native = item.get("native_turn")
+        if (
+            item.get("role") == "assistant"
+            and item.get("provider") == "openai"
+            and isinstance(native, dict)
+        ):
+            messages.append(copy.deepcopy(native))
+        else:
+            messages.append({"role": str(item["role"]), "content": _text(item.get("content"))})
+    return messages
+
+
+def _anthropic_messages(history: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    messages = []
+    system = []
+    for item in history:
+        role = item["role"]
+        if role in {"system", "developer"}:
+            system.append(_text(item.get("content")))
+            continue
+        if role not in {"user", "assistant"}:
+            raise ValueError(f"Anthropic does not support role {role!r}")
+        native = item.get("native_turn")
+        content = (
+            copy.deepcopy(native["content"])
+            if role == "assistant"
+            and item.get("provider") == "anthropic"
+            and isinstance(native, dict)
+            and isinstance(native.get("content"), list)
+            else [{"type": "text", "text": _text(item.get("content"))}]
+        )
+        messages.append({"role": role, "content": content})
+    return messages, "\n\n".join(filter(None, system))
+
+
+def _gemini_messages(history: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    messages = []
+    system = []
+    for item in history:
+        role = item["role"]
+        if role in {"system", "developer"}:
+            system.append({"text": _text(item.get("content"))})
+            continue
+        if role not in {"user", "assistant"}:
+            raise ValueError(f"Gemini does not support role {role!r}")
+        native = item.get("native_turn")
+        parts = (
+            copy.deepcopy(native["parts"])
+            if role == "assistant"
+            and item.get("provider") == "gemini"
+            and isinstance(native, dict)
+            and isinstance(native.get("parts"), list)
+            else [{"text": _text(item.get("content"))}]
+        )
+        messages.append({"role": "model" if role == "assistant" else "user", "parts": parts})
+    return messages, system
+
+
+def _usage(provider: str, raw: Any) -> dict[str, Any]:
+    raw = raw if isinstance(raw, dict) else {}
+    if provider == "openai":
+        return copy.deepcopy(raw)
+    if provider == "anthropic":
+        prompt = int(raw.get("input_tokens", 0) or 0)
+        completion = int(raw.get("output_tokens", 0) or 0)
+    else:
+        prompt = int(raw.get("promptTokenCount", 0) or 0)
+        completion = int(raw.get("candidatesTokenCount", 0) or 0)
+        if not completion:
+            completion = max(0, int(raw.get("totalTokenCount", 0) or 0) - prompt)
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+    }
+
+
+def _result(
+    model: str,
+    provider: str,
+    raw: dict[str, Any],
+    content: str,
+    reasoning: str,
+    native_turn: dict[str, Any],
+    finish_reason: Any,
+    usage: Any,
+) -> dict[str, Any]:
+    return {
+        "model": str(raw.get("model") or raw.get("modelVersion") or model),
+        "provider": provider,
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "reasoning_content": reasoning,
+                    "provider": provider,
+                    "native_turn": native_turn,
+                },
+                "finish_reason": finish_reason,
+            }
+        ],
+        "usage": _usage(provider, usage),
+        "raw_response": raw,
+    }
+
+
+def _call_openai(history, model, key, base, max_tokens):
+    raw = _post(
+        f"{base}/chat/completions",
+        {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        {
+            "model": model,
+            "messages": _openai_messages(history),
+            "max_tokens": max_tokens,
+            "stream": False,
+        },
+        key,
+    )
+    try:
+        choice = raw["choices"][0]
+        native = copy.deepcopy(choice["message"])
+        if not isinstance(native, dict):
+            raise TypeError
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("TATU OpenAI response has no assistant message") from exc
+    native.setdefault("role", "assistant")
+    return _result(
+        model,
+        "openai",
+        raw,
+        _text(native.get("content")),
+        _text(native.get("reasoning_content")),
+        native,
+        choice.get("finish_reason"),
+        raw.get("usage"),
+    )
+
+
+def _call_anthropic(history, model, key, base, max_tokens):
+    messages, system = _anthropic_messages(history)
+    payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": False}
+    if system:
+        payload["system"] = system
+    raw = _post(
+        f"{base}/messages",
+        {
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01",
+        },
+        payload,
+        key,
+    )
+    blocks = raw.get("content")
+    if not isinstance(blocks, list):
+        raise RuntimeError("TATU Anthropic response has no content blocks")
+    content = "".join(
+        part.get("text", "")
+        for part in blocks
+        if isinstance(part, dict) and part.get("type") == "text"
+    )
+    reasoning = "\n".join(
+        part.get("thinking", "")
+        for part in blocks
+        if isinstance(part, dict) and part.get("type") == "thinking"
+    )
+    return _result(
+        model,
+        "anthropic",
+        raw,
+        content,
+        reasoning,
+        {"role": "assistant", "content": copy.deepcopy(blocks)},
+        raw.get("stop_reason"),
+        raw.get("usage"),
+    )
+
+
+def _call_gemini(history, model, key, base, max_tokens):
+    messages, system = _gemini_messages(history)
+    payload = {"contents": messages, "generationConfig": {"maxOutputTokens": max_tokens}}
+    if system:
+        payload["systemInstruction"] = {"parts": system}
+    origin = base.removesuffix("/v1").rstrip("/")
+    raw = _post(
+        f"{origin}/v1beta/models/{quote(model, safe='')}:generateContent",
+        {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        payload,
+        key,
+    )
+    try:
+        candidate = raw["candidates"][0]
+        parts = candidate["content"]["parts"]
+        if not isinstance(parts, list):
+            raise TypeError
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("TATU Gemini response has no candidate") from exc
+    content = "".join(
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict) and part.get("thought") is not True
+    )
+    reasoning = "\n".join(
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict) and part.get("thought") is True
+    )
+    return _result(
+        model,
+        "gemini",
+        raw,
+        content,
+        reasoning,
+        {"role": "model", "parts": copy.deepcopy(parts)},
+        candidate.get("finishReason"),
+        raw.get("usageMetadata"),
+    )
+
 
 def call_llm_full(message, m):
     if m == "gpt-oss-120b":
         return call_openrouter(message, "openai/" + m)
-    else:
-        raise Exception("unsupported model")
+    try:
+        provider = TATU_MODELS[m]
+    except KeyError as exc:
+        raise ValueError(f"unsupported model: {m}") from exc
+    key, base, max_tokens = _tatu_settings()
+    history = generate_messages(message)
+    if provider == "openai":
+        return _call_openai(history, m, key, base, max_tokens)
+    if provider == "anthropic":
+        return _call_anthropic(history, m, key, base, max_tokens)
+    return _call_gemini(history, m, key, base, max_tokens)
+
 
 def call_llm(message, m):
-    result = call_llm_full(message, m)['choices'][0]['message']
-    return str(result['content'])
+    result = call_llm_full(message, m)["choices"][0]["message"]
+    return str(result["content"])
+
 
 def call_llm_details(message, m):
-    llm = call_llm_full(message, m)
-    result = llm['choices'][0]['message']
-    return str(result['content']), result, llm.get('usage', {})
+    result = call_llm_full(message, m)
+    assistant = copy.deepcopy(result["choices"][0]["message"])
+    if "raw_response" in result:
+        assistant["raw_response"] = copy.deepcopy(result["raw_response"])
+    return str(assistant["content"]), assistant, copy.deepcopy(result.get("usage", {}))
+
+
+def assistant_history_message(assistant_message, full_msg):
+    """Trim a detailed result to the provider-native fields needed next turn."""
+    item = {
+        "role": "assistant",
+        "content": assistant_message,
+        "reasoning_content": str(full_msg.get("reasoning_content") or ""),
+    }
+    for key in ("provider", "native_turn"):
+        if key in full_msg:
+            item[key] = copy.deepcopy(full_msg[key])
+    return item
