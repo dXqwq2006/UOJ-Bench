@@ -9,8 +9,6 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 
 __all__ = [
@@ -96,15 +94,7 @@ def _tatu_settings() -> tuple[str, str, int]:
 
 
 def _post(url: str, headers: dict[str, str], payload: dict[str, Any], secret: str) -> dict[str, Any]:
-    retry = Retry(
-        total=_env_int("TATU_MAX_RETRIES", 3, 0, 5),
-        backoff_factor=1,
-        status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset({"POST"}),
-        respect_retry_after_header=True,
-    )
     with requests.Session() as session:
-        session.mount("https://", HTTPAdapter(max_retries=retry))
         response = session.post(
             url,
             headers=headers,
@@ -200,14 +190,20 @@ def _usage(provider: str, raw: Any) -> dict[str, Any]:
         completion = int(raw.get("output_tokens", 0) or 0)
     else:
         prompt = int(raw.get("promptTokenCount", 0) or 0)
-        completion = int(raw.get("candidatesTokenCount", 0) or 0)
-        if not completion:
-            completion = max(0, int(raw.get("totalTokenCount", 0) or 0) - prompt)
-    return {
+        total = int(raw.get("totalTokenCount", 0) or 0)
+        if total:
+            completion = max(0, total - prompt)
+        else:
+            completion = int(raw.get("candidatesTokenCount", 0) or 0)
+            completion += int(raw.get("thoughtsTokenCount", 0) or 0)
+    usage = {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
         "total_tokens": prompt + completion,
     }
+    if provider == "gemini" and "thoughtsTokenCount" in raw:
+        usage["reasoning_tokens"] = int(raw.get("thoughtsTokenCount", 0) or 0)
+    return usage
 
 
 def _result(
@@ -219,6 +215,7 @@ def _result(
     native_turn: dict[str, Any],
     finish_reason: Any,
     usage: Any,
+    request_config: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "model": str(raw.get("model") or raw.get("modelVersion") or model),
@@ -236,20 +233,25 @@ def _result(
             }
         ],
         "usage": _usage(provider, usage),
+        "request_config": copy.deepcopy(request_config),
         "raw_response": raw,
     }
 
 
 def _call_openai(history, model, key, base, max_tokens):
+    payload = {
+        "model": model,
+        "messages": _openai_messages(history),
+        "max_tokens": max_tokens,
+        "stream": False,
+    }
+    reasoning_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
     raw = _post(
         f"{base}/chat/completions",
         {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        {
-            "model": model,
-            "messages": _openai_messages(history),
-            "max_tokens": max_tokens,
-            "stream": False,
-        },
+        payload,
         key,
     )
     try:
@@ -269,6 +271,7 @@ def _call_openai(history, model, key, base, max_tokens):
         native,
         choice.get("finish_reason"),
         raw.get("usage"),
+        {"max_output_tokens": max_tokens, "reasoning_effort": reasoning_effort or None},
     )
 
 
@@ -309,6 +312,7 @@ def _call_anthropic(history, model, key, base, max_tokens):
         {"role": "assistant", "content": copy.deepcopy(blocks)},
         raw.get("stop_reason"),
         raw.get("usage"),
+        {"max_output_tokens": max_tokens},
     )
 
 
@@ -317,7 +321,11 @@ def _call_gemini(history, model, key, base, max_tokens):
     payload = {"contents": messages, "generationConfig": {"maxOutputTokens": max_tokens}}
     if system:
         payload["systemInstruction"] = {"parts": system}
-    origin = base.removesuffix("/v1").rstrip("/")
+    origin = base.rstrip("/")
+    for suffix in ("/v1beta", "/v1"):
+        if origin.endswith(suffix):
+            origin = origin.removesuffix(suffix)
+            break
     raw = _post(
         f"{origin}/v1beta/models/{quote(model, safe='')}:generateContent",
         {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -350,6 +358,7 @@ def _call_gemini(history, model, key, base, max_tokens):
         {"role": "model", "parts": copy.deepcopy(parts)},
         candidate.get("finishReason"),
         raw.get("usageMetadata"),
+        {"max_output_tokens": max_tokens},
     )
 
 
@@ -379,6 +388,9 @@ def call_llm_details(message, m):
     assistant = copy.deepcopy(result["choices"][0]["message"])
     if "raw_response" in result:
         assistant["raw_response"] = copy.deepcopy(result["raw_response"])
+    for key in ("model", "request_config"):
+        if key in result:
+            assistant[key] = copy.deepcopy(result[key])
     return str(assistant["content"]), assistant, copy.deepcopy(result.get("usage", {}))
 
 

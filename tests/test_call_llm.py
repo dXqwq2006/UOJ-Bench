@@ -98,8 +98,8 @@ class CallLlmTests(unittest.TestCase):
             "TATU_API_KEY": "tatu-secret",
             "TATU_BASE_URL": "https://tatu.test/v1/",
             "TATU_MAX_OUTPUT_TOKENS": "999999",
-            "TATU_MAX_RETRIES": "999",
             "TATU_TIMEOUT_SECONDS": "999999",
+            "TATU_REASONING_EFFORT": "",
         }
         with patch.dict(os.environ, env, clear=False), patch(
             "utils.call_llm.requests.Session", return_value=context
@@ -129,15 +129,40 @@ class CallLlmTests(unittest.TestCase):
             },
             timeout=900,
         )
-        adapter = session.mount.call_args.args[1]
-        self.assertEqual(adapter.max_retries.total, 5)
+        session.mount.assert_not_called()
         message = result["choices"][0]["message"]
         self.assertEqual(message["content"], "answer")
         self.assertEqual(message["reasoning_content"], "thought")
         self.assertEqual(message["provider"], "openai")
         self.assertEqual(message["native_turn"]["content"], "answer")
         self.assertEqual(result["usage"]["total_tokens"], 12)
+        self.assertEqual(
+            result["request_config"],
+            {"max_output_tokens": 65536, "reasoning_effort": None},
+        )
         self.assertNotIn("tatu-secret", repr(result))
+
+    def test_gpt_sol_reasoning_effort_is_explicit_and_auditable(self):
+        raw = {
+            "choices": [{"message": {"role": "assistant", "content": "answer"}}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5},
+        }
+        context, session = self.tatu_session(raw)
+        with patch.dict(
+            os.environ,
+            {
+                "TATU_API_KEY": "key",
+                "TATU_BASE_URL": "https://tatu.test/v1",
+                "TATU_REASONING_EFFORT": "max",
+            },
+        ), patch("utils.call_llm.requests.Session", return_value=context):
+            result = call_llm.call_llm_full("question", "gpt-5.6-sol")
+
+        self.assertEqual(session.post.call_args.kwargs["json"]["reasoning_effort"], "max")
+        self.assertEqual(
+            result["request_config"],
+            {"max_output_tokens": 65536, "reasoning_effort": "max"},
+        )
 
     def test_anthropic_native_history_and_normalization(self):
         blocks = [
@@ -199,7 +224,8 @@ class CallLlmTests(unittest.TestCase):
             "usageMetadata": {
                 "promptTokenCount": 17,
                 "candidatesTokenCount": 19,
-                "totalTokenCount": 36,
+                "thoughtsTokenCount": 23,
+                "totalTokenCount": 59,
             },
         }
         context, session = self.tatu_session(raw)
@@ -220,7 +246,7 @@ class CallLlmTests(unittest.TestCase):
         ]
         with patch.dict(
             os.environ,
-            {"TATU_API_KEY": "key", "TATU_BASE_URL": "https://tatu.test/v1"},
+            {"TATU_API_KEY": "key", "TATU_BASE_URL": "https://tatu.test/v1beta/"},
         ), patch("utils.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gemini-3.1-pro-preview")
 
@@ -236,7 +262,33 @@ class CallLlmTests(unittest.TestCase):
         self.assertEqual(message["content"], "public answer")
         self.assertEqual(message["reasoning_content"], "private thought")
         self.assertEqual(message["native_turn"]["parts"], new_parts)
-        self.assertEqual(result["usage"]["total_tokens"], 36)
+        self.assertEqual(
+            result["usage"],
+            {
+                "prompt_tokens": 17,
+                "completion_tokens": 42,
+                "total_tokens": 59,
+                "reasoning_tokens": 23,
+            },
+        )
+
+    def test_gemini_usage_falls_back_to_candidate_plus_thinking_tokens(self):
+        self.assertEqual(
+            call_llm._usage(
+                "gemini",
+                {
+                    "promptTokenCount": 5,
+                    "candidatesTokenCount": 7,
+                    "thoughtsTokenCount": 11,
+                },
+            ),
+            {
+                "prompt_tokens": 5,
+                "completion_tokens": 18,
+                "total_tokens": 23,
+                "reasoning_tokens": 11,
+            },
+        )
 
     def test_details_shape_and_errors(self):
         normalized = {
