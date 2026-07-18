@@ -4,8 +4,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("UOJ_API_KEY", "offline")
 
-from scripts import test_debug, test_hack, test_problem
+from scripts import test_debug, test_debug_agent, test_hack, test_hack_agent, test_problem
 from utils.solver import (
+    FeedbackKind,
     HackCandidate,
     PatchCandidate,
     SolutionCandidate,
@@ -19,6 +20,28 @@ class Session:
 
     def next(self, feedback=None):
         return self.turn
+
+    @property
+    def transcript(self):
+        return [{"role": "user", "content": "prompt"}]
+
+
+class SequenceSession:
+    def __init__(self, *candidates):
+        self.turns = iter(
+            SolverTurn(candidate, "raw", {"raw": True}, {"total_tokens": 3},
+                       None if candidate else "invalid")
+            for candidate in candidates
+        )
+        self.feedback = []
+
+    def next(self, feedback=None):
+        self.feedback.append(feedback)
+        return next(self.turns)
+
+    @property
+    def transcript(self):
+        return [{"role": "user", "content": "prompt"}]
 
 
 class FakeSolver:
@@ -41,12 +64,14 @@ class FakeSolver:
 
 class FakeClient:
     def __init__(self, score):
-        self.score = score
+        self.scores = iter(score if isinstance(score, list) else [score])
         self.request = None
+        self.requests = []
 
     def makeBackgroundSubmission(self, request):
         self.request = request
-        return {"result": {"score": self.score}}
+        self.requests.append(request)
+        return {"result": {"score": next(self.scores)}}
 
 
 class DirectTaskTests(unittest.TestCase):
@@ -93,6 +118,64 @@ class DirectTaskTests(unittest.TestCase):
 
         self.assertEqual(score, 1)
         self.assertEqual(client.request.files["sub_answer_text"], (None, "fixed"))
+
+
+class AgentTaskTests(unittest.TestCase):
+    def test_hacking_routes_parser_and_judge_feedback_through_session(self):
+        session = SequenceSession(None, HackCandidate("print(1)"), HackCandidate("print(2)"))
+        solver = FakeSolver(None)
+        solver.start_hacking = lambda task: session
+        client = FakeClient([0, 1])
+
+        with patch.object(test_hack_agent, "Client", return_value=client):
+            score, transcript, results, messages, usages = test_hack_agent.TestHackAgent(
+                solver, 1, "statement", "wrong", max_trials=3
+            )
+
+        self.assertEqual(score, 1)
+        self.assertEqual(transcript, session.transcript)
+        self.assertEqual(len(results), 2)
+        self.assertEqual(len(messages), 3)
+        self.assertEqual(len(usages), 3)
+        self.assertIsNone(session.feedback[0])
+        self.assertEqual(session.feedback[1].kind, FeedbackKind.INVALID_OUTPUT)
+        self.assertEqual(session.feedback[2].kind, FeedbackKind.JUDGE_REJECTED)
+
+    def test_repair_routes_local_and_judge_feedback_through_session(self):
+        session = SequenceSession(
+            PatchCandidate("bad"),
+            PatchCandidate("large"),
+            PatchCandidate("wrong"),
+            PatchCandidate("fixed"),
+        )
+        solver = FakeSolver(None)
+        solver.start_repair = lambda task: session
+        client = FakeClient([0, 100])
+
+        def apply_patch(source, candidate):
+            if candidate == "bad":
+                raise ValueError("bad patch")
+            return candidate
+
+        with (
+            patch.object(test_debug_agent, "Client", return_value=client),
+            patch.object(test_debug_agent, "apply_patch_to_code", side_effect=apply_patch),
+            patch.object(test_debug_agent, "similarity", side_effect=[0.5, 0.95, 0.95]),
+        ):
+            score, *_ = test_debug_agent.TestDebugAgent(
+                solver, 1, "statement", "wrong", max_trials=4
+            )
+
+        self.assertEqual(score, 1)
+        self.assertEqual(
+            [feedback.kind for feedback in session.feedback[1:]],
+            [
+                FeedbackKind.PATCH_ERROR,
+                FeedbackKind.SIMILARITY_REJECTION,
+                FeedbackKind.JUDGE_REJECTED,
+            ],
+        )
+        self.assertEqual(len(client.requests), 2)
 
 
 if __name__ == "__main__":

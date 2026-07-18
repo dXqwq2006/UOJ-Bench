@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
+import copy
 import re
 from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Protocol, TypeVar
 
@@ -94,6 +95,10 @@ class SolverTurn(Generic[CandidateT]):
 
 
 class SolverSession(Protocol, Generic[CandidateT]):
+    @property
+    def transcript(self) -> List[Dict[str, Any]]:
+        ...
+
     def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[CandidateT]:
         ...
 
@@ -163,15 +168,18 @@ class _PromptSession(Generic[CandidateT]):
         self.started = False
 
     def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[CandidateT]:
+        feedback_message = None
         if feedback is not None:
             if not self.started:
                 raise ValueError("feedback requires a previous solver turn")
-            self.history.append({"role": "user", "content": self._render_feedback(feedback)})
+            feedback_message = {"role": "user", "content": self._render_feedback(feedback)}
         elif self.started:
             raise ValueError("subsequent solver turns require feedback")
 
-        request = list(self.history) if self.started else self.prompt
+        request = self.history + [feedback_message] if feedback_message else self.prompt
         raw_text, message, usage = self.call_details(request, self.model)
+        if feedback_message:
+            self.history.append(feedback_message)
         self.started = True
         self._append_assistant(raw_text, message)
 
@@ -184,6 +192,10 @@ class _PromptSession(Generic[CandidateT]):
             usage=usage,
             error=None if match else error,
         )
+
+    @property
+    def transcript(self) -> List[Dict[str, Any]]:
+        return copy.deepcopy(self.history)
 
     def _append_assistant(self, raw_text: str, message: Any) -> None:
         if isinstance(message, Mapping) and message.get("native_turn"):
