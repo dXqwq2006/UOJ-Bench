@@ -19,6 +19,8 @@ __all__ = [
     "SolverFeedback",
     "SolverSession",
     "SolverTurn",
+    "resolve_solver",
+    "solver_metadata",
 ]
 
 
@@ -134,6 +136,15 @@ class PromptSolver:
 
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
         return _PromptSession(self.model, self.call_details, task.official_prompt, "repair")
+
+
+def resolve_solver(value: Any) -> Solver:
+    return PromptSolver(value) if isinstance(value, str) else value
+
+
+def solver_metadata(record: Mapping[str, Any]) -> Mapping[str, Any]:
+    hidden = {"correct_code", "correct_id", "error_type"}
+    return {key: value for key, value in record.items() if key not in hidden}
 
 
 class _PromptSession(Generic[CandidateT]):

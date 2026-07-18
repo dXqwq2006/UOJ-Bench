@@ -1,7 +1,7 @@
 import json
 
 from utils.uoj_api import SubmissionRequest, Client
-from utils.call_llm import *
+from utils.solver import HackingInput, resolve_solver, solver_metadata
 
 prompt = """
 You are an expert at breaking buggy code. You will be given a buggy code and the complete description of the problem it intends to solve. Your task is to find a valid input, respecting the input format and constraints, that causes the code to fail (e.g., produces a Wrong Answer or exceeds the time limit).
@@ -43,21 +43,19 @@ prompt_chinese = """
 try_again_prompt = "\nTry again! Output a new python code which would generate the correct hack data."
 
 def TestHack(model, problem_id, problem_statement, submission_code, submission_language='C++20',
-             chinese=False):
+             chinese=False, metadata=None):
     # Initialize UOJ client
     client = Client()
     use_prompt = prompt_chinese if chinese else prompt
     message = use_prompt.format(problem=problem_statement, code=submission_code)
 
-    assistant_message, full_msg, usage = call_llm_details(message, model)
-
-    # Extract code between ```python and ``` markers
-    import re
-    code_match = re.search(r'```python\n(.*?)```', assistant_message, re.DOTALL)
-    if code_match:
-        code = code_match.group(1)
-    else:
-        return 0, message, "no output hack data", full_msg, usage
+    task = HackingInput(problem_id, problem_statement, submission_code, message,
+                        submission_language, metadata or {})
+    turn = resolve_solver(model).start_hacking(task).next()
+    full_msg, usage = turn.message, turn.usage
+    if turn.candidate is None:
+        return 0, message, turn.error, full_msg, usage
+    code = turn.candidate.generator
 
     sub = SubmissionRequest(problem_id=problem_id, type='hack')
     sub.addSourceCodeText("answer", submission_code, language=submission_language)
@@ -102,7 +100,7 @@ if __name__ == '__main__':
 
     score, message, result, full_msg, usage = TestHack(args.model, problem_id, problem_statement,
                                                        submission_code, submission_language,
-                                                       args.chinese)
+                                                       args.chinese, solver_metadata(hack))
 
     print(json.dumps({
         'hack_score': score,

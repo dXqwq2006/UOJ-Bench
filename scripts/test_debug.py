@@ -1,7 +1,7 @@
 import json
-from utils.call_llm import *
 from utils.uoj_api import SubmissionRequest, Client
 from utils.patch import *
+from utils.solver import RepairInput, resolve_solver, solver_metadata
 
 prompt = """
 You are an expert at fixing bugs in code. You will be given a buggy code and the complete description of the problem it intends to solve. Your job is to modify the code to make it correct while making as few changes as possible. The change must be expressed as a patch file that can be directly applied to the code using the patch command. Do not add any comments or explanations in the patch. Make sure your patch is minimal, i.e., the number of lines of code added or deleted is as small as possible. Enclose your patch within delimiters as follows.
@@ -75,22 +75,20 @@ def similarity(a: str, b: str) -> float:
     return 1 - dist / max_len
 
 def TestDebug(model, problem_id, problem_statement, submission_code, submission_language='C++20',
-              chinese=False):
+              chinese=False, metadata=None):
     submission_code = submission_code.replace('\r', '')
 
     client = Client()
     use_prompt = prompt_chinese if chinese else prompt
     message = use_prompt.format(problem=problem_statement, code=submission_code)
 
-    assistant_message, full_msg, usage = call_llm_details(message, model)
-
-    # Extract patch between ```patch and ``` markers
-    import re
-    patch_match = re.search(r'```patch\n(.*?)```', assistant_message, re.DOTALL)
-    if patch_match:
-        patch = patch_match.group(1)
-    else:
-        return 0, message, "no output patch", full_msg, usage
+    task = RepairInput(problem_id, problem_statement, submission_code, message,
+                       submission_language, metadata or {})
+    turn = resolve_solver(model).start_repair(task).next()
+    full_msg, usage = turn.message, turn.usage
+    if turn.candidate is None:
+        return 0, message, turn.error, full_msg, usage
+    patch = turn.candidate.patch
 
     # apply patch to code
     new_code = apply_patch_to_code(submission_code, patch)
@@ -134,7 +132,7 @@ if __name__ == '__main__':
 
     score, message, result, full_msg, usage = TestDebug(args.model, problem_id, problem_statement,
                                                         submission_code, submission_language,
-                                                        args.chinese)
+                                                        args.chinese, solver_metadata(similar_code))
 
     print(json.dumps({
         'debug_score': score,

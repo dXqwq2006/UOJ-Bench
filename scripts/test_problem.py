@@ -1,7 +1,7 @@
 import json
 
-from utils.call_llm import *
 from utils.uoj_api import SubmissionRequest, Client
+from utils.solver import GenerationInput, resolve_solver
 
 __all__ = 'TestProblemAgent'
 
@@ -38,20 +38,17 @@ prompt_chinese = """
 """
 
 
-def TestProblem(model, problem_id, problem_statement, chinese=False):
+def TestProblem(model, problem_id, problem_statement, chinese=False, metadata=None):
     client = Client()
     use_prompt = prompt_chinese if chinese else prompt
     message = use_prompt.format(problem=problem_statement)
 
-    assistant_message, full_msg, usage = call_llm_details(message, model)
-
-    # Extract code between ```python and ``` markers
-    import re
-    code_match = re.search(r'```cpp\n(.*?)```', assistant_message, re.DOTALL)
-    if code_match:
-        code = code_match.group(1)
-    else:
-        return 0, message, "no output code", full_msg, usage
+    task = GenerationInput(problem_id, problem_statement, message, metadata=metadata or {})
+    turn = resolve_solver(model).start_generation(task).next()
+    full_msg, usage = turn.message, turn.usage
+    if turn.candidate is None:
+        return 0, message, turn.error, full_msg, usage
+    code = turn.candidate.source
 
     sub = SubmissionRequest(problem_id=problem_id, type='normal')
     sub.addSourceCodeText("answer", code, language="C++20")
@@ -78,7 +75,7 @@ if __name__ == '__main__':
     problem_statement = problem['statement_en'] if not args.chinese else problem['statement_zh']
 
     score, message, result, full_msg, usage = TestProblem(args.model, problem_id, problem_statement,
-                                                          args.chinese)
+                                                          args.chinese, problem)
 
     print(json.dumps({
         'score': score,
