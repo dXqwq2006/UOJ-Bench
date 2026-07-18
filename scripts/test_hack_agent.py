@@ -43,34 +43,40 @@ def TestHackAgent(model, problem_id, problem_statement, submission_code, submiss
     task = HackingInput(problem_id, problem_statement, submission_code, message,
                         submission_language, metadata or {})
     session = resolve_solver(model).start_hacking(task)
-    feedback = None
     while counted_trials < max_trials:
         try:
-            turn = session.next(feedback)
+            transcript = session.transcript
+            if transcript:
+                full_msgs.append(transcript[-1])
+            turn = session.next()
+            full_msgs.append(turn.message)
+            usages.append(turn.usage)
+            if turn.candidate is None:
+                session.record_feedback(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
+                counted_trials += 1
+                continue
+
+            sub = SubmissionRequest(problem_id=problem_id, type='hack')
+            sub.addSourceCodeText("answer", submission_code, language=submission_language)
+            sub.addHackInputText(turn.candidate.generator, language='Python3')
+            sub.flagFormatInputFile() # auto-remove extra spaces in the input file
+
+            result = client.makeBackgroundSubmission(sub)
+            results.append(result)
+            if 'result' in result and 'score' in result['result'] and result['result']['score'] == 1:
+                return 1, session.transcript, results, full_msgs, usages
+
+            session.record_feedback(SolverFeedback(FeedbackKind.JUDGE_REJECTED, result))
+            counted_trials += 1
         except requests.exceptions.RequestException as e:
             print(f"Trial {counted_trials + 1} failed with request error: {e}")
             time.sleep(20)
             continue
-
-        full_msgs.append(turn.message)
-        usages.append(turn.usage)
-        if turn.candidate is None:
-            feedback = SolverFeedback(FeedbackKind.INVALID_OUTPUT)
+        except Exception as e:
+            print(f"Trial {counted_trials + 1} failed with unknown error: {e}")
             counted_trials += 1
+            session.record_feedback(SolverFeedback(FeedbackKind.RUNTIME_ERROR, str(e)))
             continue
-
-        sub = SubmissionRequest(problem_id=problem_id, type='hack')
-        sub.addSourceCodeText("answer", submission_code, language=submission_language)
-        sub.addHackInputText(turn.candidate.generator, language='Python3')
-        sub.flagFormatInputFile() # auto-remove extra spaces in the input file
-
-        result = client.makeBackgroundSubmission(sub)
-        results.append(result)
-        if 'result' in result and 'score' in result['result'] and result['result']['score'] == 1:
-            return 1, session.transcript, results, full_msgs, usages
-
-        feedback = SolverFeedback(FeedbackKind.JUDGE_REJECTED, result)
-        counted_trials += 1
     # If we get here, all trials failed
     return 0, session.transcript, results, full_msgs, usages
 

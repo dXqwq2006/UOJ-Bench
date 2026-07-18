@@ -1,7 +1,7 @@
 import json
 
 from utils.uoj_api import SubmissionRequest, Client
-from utils.solver import GenerationInput, resolve_solver
+from utils.solver import GenerationInput, resolve_solver, solver_metadata
 
 __all__ = 'TestProblemAgent'
 
@@ -75,7 +75,7 @@ if __name__ == '__main__':
     problem_statement = problem['statement_en'] if not args.chinese else problem['statement_zh']
 
     score, message, result, full_msg, usage = TestProblem(args.model, problem_id, problem_statement,
-                                                          args.chinese, problem)
+                                                          args.chinese, solver_metadata(problem))
 
     print(json.dumps({
         'score': score,

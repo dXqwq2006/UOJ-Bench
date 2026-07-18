@@ -1,4 +1,5 @@
 import os
+import requests
 import unittest
 from unittest.mock import patch
 
@@ -34,14 +35,35 @@ class SequenceSession:
             for candidate in candidates
         )
         self.feedback = []
+        self.next_calls = 0
+        self.history = [{"role": "user", "content": "prompt"}]
 
     def next(self, feedback=None):
-        self.feedback.append(feedback)
+        if feedback is not None:
+            self.record_feedback(feedback)
+        self.next_calls += 1
         return next(self.turns)
+
+    def record_feedback(self, feedback):
+        self.feedback.append(feedback)
+        self.history.append({"role": "user", "feedback": feedback.kind})
 
     @property
     def transcript(self):
-        return [{"role": "user", "content": "prompt"}]
+        return list(self.history)
+
+
+class ModelTransportSession(SequenceSession):
+    def __init__(self, *candidates):
+        super().__init__(*candidates)
+        self.failed = False
+
+    def next(self, feedback=None):
+        if not self.failed:
+            self.failed = True
+            self.next_calls += 1
+            raise requests.exceptions.ConnectionError("model down")
+        return super().next(feedback)
 
 
 class FakeSolver:
@@ -71,7 +93,10 @@ class FakeClient:
     def makeBackgroundSubmission(self, request):
         self.request = request
         self.requests.append(request)
-        return {"result": {"score": next(self.scores)}}
+        outcome = next(self.scores)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return {"result": {"score": outcome}}
 
 
 class DirectTaskTests(unittest.TestCase):
@@ -135,11 +160,10 @@ class AgentTaskTests(unittest.TestCase):
         self.assertEqual(score, 1)
         self.assertEqual(transcript, session.transcript)
         self.assertEqual(len(results), 2)
-        self.assertEqual(len(messages), 3)
+        self.assertEqual(len(messages), 6)
         self.assertEqual(len(usages), 3)
-        self.assertIsNone(session.feedback[0])
-        self.assertEqual(session.feedback[1].kind, FeedbackKind.INVALID_OUTPUT)
-        self.assertEqual(session.feedback[2].kind, FeedbackKind.JUDGE_REJECTED)
+        self.assertEqual(session.feedback[0].kind, FeedbackKind.INVALID_OUTPUT)
+        self.assertEqual(session.feedback[1].kind, FeedbackKind.JUDGE_REJECTED)
 
     def test_repair_routes_local_and_judge_feedback_through_session(self):
         session = SequenceSession(
@@ -168,7 +192,7 @@ class AgentTaskTests(unittest.TestCase):
 
         self.assertEqual(score, 1)
         self.assertEqual(
-            [feedback.kind for feedback in session.feedback[1:]],
+            [feedback.kind for feedback in session.feedback],
             [
                 FeedbackKind.PATCH_ERROR,
                 FeedbackKind.SIMILARITY_REJECTION,
@@ -176,6 +200,74 @@ class AgentTaskTests(unittest.TestCase):
             ],
         )
         self.assertEqual(len(client.requests), 2)
+
+    def test_hacking_preserves_outer_round_retry_after_uoj_transport_failure(self):
+        session = SequenceSession(HackCandidate("print(1)"), HackCandidate("print(2)"))
+        solver = FakeSolver(None)
+        solver.start_hacking = lambda task: session
+        client = FakeClient([requests.exceptions.ConnectionError("uoj down"), 1])
+
+        with (
+            patch.object(test_hack_agent, "Client", return_value=client),
+            patch.object(test_hack_agent.time, "sleep"),
+        ):
+            score, *_ = test_hack_agent.TestHackAgent(
+                solver, 1, "statement", "wrong", max_trials=1
+            )
+
+        self.assertEqual(score, 1)
+        self.assertEqual(session.next_calls, 2)
+        self.assertEqual(len(client.requests), 2)
+
+    def test_hacking_model_transport_failure_does_not_consume_a_trial(self):
+        session = ModelTransportSession(HackCandidate("print(1)"))
+        solver = FakeSolver(None)
+        solver.start_hacking = lambda task: session
+        client = FakeClient(1)
+
+        with (
+            patch.object(test_hack_agent, "Client", return_value=client),
+            patch.object(test_hack_agent.time, "sleep"),
+        ):
+            score, *_ = test_hack_agent.TestHackAgent(
+                solver, 1, "statement", "wrong", max_trials=1
+            )
+
+        self.assertEqual(score, 1)
+        self.assertEqual(session.next_calls, 2)
+        self.assertEqual(len(client.requests), 1)
+
+    def test_repair_preserves_outer_round_retry_after_uoj_transport_failure(self):
+        session = SequenceSession(PatchCandidate("first"), PatchCandidate("second"))
+        solver = FakeSolver(None)
+        solver.start_repair = lambda task: session
+        client = FakeClient([requests.exceptions.ConnectionError("uoj down"), 100])
+
+        with (
+            patch.object(test_debug_agent, "Client", return_value=client),
+            patch.object(test_debug_agent, "apply_patch_to_code", return_value="fixed"),
+            patch.object(test_debug_agent, "similarity", return_value=0.95),
+        ):
+            score, *_ = test_debug_agent.TestDebugAgent(
+                solver, 1, "statement", "wrong", max_trials=1
+            )
+
+        self.assertEqual(score, 1)
+        self.assertEqual(session.next_calls, 2)
+        self.assertEqual(len(client.requests), 2)
+
+    def test_exhausted_agent_transcript_contains_final_feedback(self):
+        session = SequenceSession(None)
+        solver = FakeSolver(None)
+        solver.start_hacking = lambda task: session
+
+        with patch.object(test_hack_agent, "Client", return_value=FakeClient(1)):
+            score, transcript, *_ = test_hack_agent.TestHackAgent(
+                solver, 1, "statement", "wrong", max_trials=1
+            )
+
+        self.assertEqual(score, 0)
+        self.assertEqual(transcript[-1]["feedback"], FeedbackKind.INVALID_OUTPUT)
 
 
 if __name__ == "__main__":

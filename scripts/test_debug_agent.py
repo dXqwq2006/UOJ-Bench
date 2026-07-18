@@ -64,42 +64,49 @@ def TestDebugAgent(model, problem_id, problem_statement, submission_code, submis
     task = RepairInput(problem_id, problem_statement, submission_code, message,
                        submission_language, metadata or {})
     session = resolve_solver(model).start_repair(task)
-    feedback = None
     while counted_trials < max_trials:
         try:
-            turn = session.next(feedback)
+            transcript = session.transcript
+            if transcript:
+                full_msgs.append(transcript[-1])
+            turn = session.next()
+            full_msgs.append(turn.message)
+            usages.append(turn.usage)
+            if turn.candidate is None:
+                session.record_feedback(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
+                counted_trials += 1
+                continue
+
+            new_code = apply_patch_to_code(submission_code, turn.candidate.patch)
+            if similarity(new_code, submission_code) < 0.9:
+                session.record_feedback(SolverFeedback(FeedbackKind.SIMILARITY_REJECTION))
+                counted_trials += 1
+                continue
+
+            sub = SubmissionRequest(problem_id=problem_id, type='normal')
+            sub.addSourceCodeText("answer", new_code, language=submission_language)
+
+            result = client.makeBackgroundSubmission(sub)
+            results.append(result)
+            if 'result' in result and 'score' in result['result'] and result['result']['score'] == 100:
+                return 1, session.transcript, results, full_msgs, usages
+
+            session.record_feedback(SolverFeedback(FeedbackKind.JUDGE_REJECTED, result))
+            counted_trials += 1
         except requests.exceptions.RequestException as e:
             print(f"Trial {counted_trials + 1} failed with request error: {e}")
             continue
-
-        full_msgs.append(turn.message)
-        usages.append(turn.usage)
-        if turn.candidate is None:
-            feedback = SolverFeedback(FeedbackKind.INVALID_OUTPUT)
+        except json.JSONDecodeError as e:
+            print(f"Trial {counted_trials + 1} failed with JSON parse error: {e}")
+            continue
+        except ValueError as e:
+            session.record_feedback(SolverFeedback(FeedbackKind.PATCH_ERROR, str(e)))
             counted_trials += 1
             continue
-
-        try:
-            new_code = apply_patch_to_code(submission_code, turn.candidate.patch)
-        except (OSError, ValueError) as e:
-            feedback = SolverFeedback(FeedbackKind.PATCH_ERROR, str(e))
+        except Exception as e:
+            session.record_feedback(SolverFeedback(FeedbackKind.RUNTIME_ERROR, str(e)))
             counted_trials += 1
             continue
-        if similarity(new_code, submission_code) < 0.9:
-            feedback = SolverFeedback(FeedbackKind.SIMILARITY_REJECTION)
-            counted_trials += 1
-            continue
-
-        sub = SubmissionRequest(problem_id=problem_id, type='normal')
-        sub.addSourceCodeText("answer", new_code, language=submission_language)
-
-        result = client.makeBackgroundSubmission(sub)
-        results.append(result)
-        if 'result' in result and 'score' in result['result'] and result['result']['score'] == 100:
-            return 1, session.transcript, results, full_msgs, usages
-
-        feedback = SolverFeedback(FeedbackKind.JUDGE_REJECTED, result)
-        counted_trials += 1
     # If we get here, all trials failed
     return 0, session.transcript, results, full_msgs, usages
 

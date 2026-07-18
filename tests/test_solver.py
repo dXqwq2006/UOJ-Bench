@@ -10,6 +10,7 @@ from utils.solver import (
     RepairInput,
     SolutionCandidate,
     SolverFeedback,
+    solver_metadata,
 )
 
 
@@ -117,8 +118,32 @@ class PromptSolverTests(unittest.TestCase):
             f"The new code cannot pass all tests. Here is the results\n{result}\n\n" + retry,
         )
 
+    def test_recorded_feedback_is_visible_before_the_next_call(self):
+        caller = FakeCaller("```python\nprint(1)\n```", "```python\nprint(2)\n```")
+        session = PromptSolver("model", caller).start_hacking(hacking_input())
+        session.next()
+        session.record_feedback(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
+
+        self.assertEqual(session.transcript[-1]["role"], "user")
+        session.next()
+
+    def test_solver_metadata_is_fail_closed(self):
+        record = {
+            "problem_id": 1,
+            "title_en": "Visible title",
+            "difficulty": 7,
+            "correct_code": "oracle",
+            "reference_solution": "future oracle",
+            "language": {"nested": "oracle"},
+        }
+
+        self.assertEqual(
+            solver_metadata(record),
+            {"problem_id": 1, "title_en": "Visible title", "difficulty": 7},
+        )
+
     def test_invalid_repair_output_and_session_guards(self):
-        caller = FakeCaller("no patch", "still no patch")
+        caller = FakeCaller("no patch", "still no patch", "```patch\nx\n```")
         session = PromptSolver("model", caller).start_repair(repair_input())
         with self.assertRaisesRegex(ValueError, "previous solver turn"):
             session.next(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
@@ -126,8 +151,7 @@ class PromptSolverTests(unittest.TestCase):
         session.next(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
         retry = "\nTry again! Output a new patch which would be directly applied to the code given for the first time."
         self.assertEqual(caller.calls[1][0][-1]["content"], "No patch block found in your response" + retry)
-        with self.assertRaisesRegex(ValueError, "require feedback"):
-            session.next()
+        session.next()
 
     def test_rejects_feedback_not_defined_by_official_task(self):
         session = PromptSolver("model", FakeCaller("```cpp\nx\n```", "unused")).start_generation(generation_input())

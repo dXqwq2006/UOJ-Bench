@@ -74,6 +74,7 @@ class FeedbackKind(str, Enum):
     PATCH_ERROR = "patch_error"
     SIMILARITY_REJECTION = "similarity_rejection"
     JUDGE_REJECTED = "judge_rejected"
+    RUNTIME_ERROR = "runtime_error"
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,9 @@ class SolverSession(Protocol, Generic[CandidateT]):
         ...
 
     def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[CandidateT]:
+        ...
+
+    def record_feedback(self, feedback: SolverFeedback) -> None:
         ...
 
 
@@ -148,8 +152,24 @@ def resolve_solver(value: Any) -> Solver:
 
 
 def solver_metadata(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    hidden = {"correct_code", "correct_id", "error_type"}
-    return {key: value for key, value in record.items() if key not in hidden}
+    public_fields = {
+        "difficulty",
+        "difficulty-source",
+        "hack_id",
+        "hackable",
+        "language",
+        "problem_id",
+        "submission_id",
+        "title_en",
+        "title_zh",
+        "wrong_id",
+    }
+    scalar_types = (str, int, float, bool, type(None))
+    return {
+        key: value
+        for key, value in record.items()
+        if key in public_fields and isinstance(value, scalar_types)
+    }
 
 
 class _PromptSession(Generic[CandidateT]):
@@ -166,21 +186,18 @@ class _PromptSession(Generic[CandidateT]):
         self.task = task
         self.history: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
         self.started = False
+        self.feedback_pending = False
 
     def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[CandidateT]:
-        feedback_message = None
         if feedback is not None:
             if not self.started:
                 raise ValueError("feedback requires a previous solver turn")
-            feedback_message = {"role": "user", "content": self._render_feedback(feedback)}
-        elif self.started:
-            raise ValueError("subsequent solver turns require feedback")
+            self.record_feedback(feedback)
 
-        request = self.history + [feedback_message] if feedback_message else self.prompt
+        request = copy.deepcopy(self.history) if self.started or self.feedback_pending else self.prompt
         raw_text, message, usage = self.call_details(request, self.model)
-        if feedback_message:
-            self.history.append(feedback_message)
         self.started = True
+        self.feedback_pending = False
         self._append_assistant(raw_text, message)
 
         pattern, candidate_type, error = self._PARSERS[self.task]
@@ -193,6 +210,10 @@ class _PromptSession(Generic[CandidateT]):
             error=None if match else error,
         )
 
+    def record_feedback(self, feedback: SolverFeedback) -> None:
+        self.history.append({"role": "user", "content": self._render_feedback(feedback)})
+        self.feedback_pending = True
+
     @property
     def transcript(self) -> List[Dict[str, Any]]:
         return copy.deepcopy(self.history)
@@ -204,7 +225,7 @@ class _PromptSession(Generic[CandidateT]):
             self.history.append(assistant_history_message(raw_text, message))
             return
         reasoning = message.get("reasoning_content", "") if isinstance(message, Mapping) else ""
-        if reasoning:
+        if reasoning or self.task == "repair":
             self.history.append({"role": "assistant", "content": "[REASONING]" + reasoning})
             self.history.append({"role": "assistant", "content": "[ANSWER]" + raw_text})
         else:
@@ -220,6 +241,8 @@ class _PromptSession(Generic[CandidateT]):
                     "The python code generate invalid input or the code can still pass your test. "
                     f"Here is the results\n{feedback.detail}\n\n" + _HACK_RETRY
                 )
+            if kind is FeedbackKind.RUNTIME_ERROR:
+                return f"Meet error {feedback.detail}" + _HACK_RETRY
         elif self.task == "repair":
             if kind is FeedbackKind.INVALID_OUTPUT:
                 return "No patch block found in your response" + _REPAIR_RETRY
@@ -229,4 +252,6 @@ class _PromptSession(Generic[CandidateT]):
                 return "You made too many changes" + _REPAIR_RETRY
             if kind is FeedbackKind.JUDGE_REJECTED:
                 return f"The new code cannot pass all tests. Here is the results\n{feedback.detail}\n\n" + _REPAIR_RETRY
+            if kind is FeedbackKind.RUNTIME_ERROR:
+                return f"Meet error {feedback.detail}" + _REPAIR_RETRY
         raise ValueError(f"{kind.value} feedback is not valid for {self.task}")

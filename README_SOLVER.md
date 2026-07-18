@@ -16,6 +16,9 @@ solver.start_hacking(task).next(feedback)
 solver.start_repair(task).next(feedback)
 ```
 
+Agent runners record feedback as soon as it is produced, then request the next
+turn. Passing feedback directly to `next()` remains supported for custom use.
+
 The default `PromptSolver` sends the rendered upstream prompt to one model call
 and applies the exact upstream fence parser. It returns `SolutionCandidate`,
 `HackCandidate`, or `PatchCandidate`. A more complex pipeline can implement the
@@ -38,7 +41,13 @@ use TATU's native protocols:
 - `claude-fable-5`
 
 Set `TATU_API_KEY`; optionally set `TATU_BASE_URL`,
-`TATU_MAX_OUTPUT_TOKENS`, `TATU_MAX_RETRIES`, or `TATU_TIMEOUT_SECONDS`.
+`TATU_MAX_OUTPUT_TOKENS`, or `TATU_TIMEOUT_SECONDS`. OpenAI-protocol models also
+accept `TATU_REASONING_EFFORT`; set it explicitly for formal runs (for example,
+`max` for `gpt-5.6-sol`). The normalized response records this request setting.
+
+TATU generation POSTs are not retried inside the call adapter. This keeps one
+recorded model turn equal to one potentially billable request. The Agent runners
+retain upstream's outer-round exception and trial behavior.
 
 ## Offline verification
 
@@ -49,7 +58,7 @@ UOJ_API_KEY=offline PYTHONDONTWRITEBYTECODE=1 \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-The boundary test compares the committed tree with `ce1c006`: the dataset,
+The boundary test compares the working tree with `ce1c006`: the dataset,
 official README, patch helper, UOJ client, and all prompt strings must remain
 unchanged. This branch intentionally does not include a batch runner or durable
 submission recovery.

@@ -67,8 +67,8 @@ class UpstreamBoundaryTests(unittest.TestCase):
                 self.assertEqual(current, original)
                 self.assertTrue(current)
 
-    def test_committed_diff_stays_inside_solver_boundary(self):
-        changes = git("diff", "--name-status", UPSTREAM, "HEAD").decode().splitlines()
+    def test_diff_stays_inside_solver_boundary(self):
+        changes = git("diff", "--name-status", UPSTREAM).decode().splitlines()
         actual = {tuple(line.split("\t", 1)) for line in changes}
         allowed = {*(('M', path) for path in MODIFIED_UPSTREAM), *(('A', path) for path in ADDED)}
         self.assertEqual(actual, allowed)
