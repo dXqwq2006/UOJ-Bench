@@ -1,4 +1,5 @@
 import json
+from solution import load_solver
 from utils.uoj_api import SubmissionRequest, Client
 from utils.patch import *
 from utils.solver import RepairInput, resolve_solver, solver_metadata
@@ -110,6 +111,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/small_submission_pairs.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
+    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--debug_idx', type=int, default=0, help='The index of debugging task that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -130,7 +132,8 @@ if __name__ == '__main__':
     problem_statement = problems_by_id[problem_id]
     submission_language = similar_code['language']
 
-    score, message, result, full_msg, usage = TestDebug(args.model, problem_id, problem_statement,
+    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    score, message, result, full_msg, usage = TestDebug(solver, problem_id, problem_statement,
                                                         submission_code, submission_language,
                                                         args.chinese, solver_metadata(similar_code))
 

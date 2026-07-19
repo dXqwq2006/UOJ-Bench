@@ -1,5 +1,6 @@
 import unittest
 
+from solution import load_solver
 from utils.solver import (
     FeedbackKind,
     GenerationInput,
@@ -158,6 +159,15 @@ class PromptSolverTests(unittest.TestCase):
         session.next()
         with self.assertRaisesRegex(ValueError, "not valid for generation"):
             session.next(SolverFeedback(FeedbackKind.JUDGE_REJECTED, {}))
+
+
+class SolutionLoaderTests(unittest.TestCase):
+    def test_loads_directory_solver_and_rejects_invalid_names(self):
+        solver = load_solver("prompt", "model")
+        self.assertIsInstance(solver, PromptSolver)
+        self.assertEqual(solver.model, "model")
+        with self.assertRaisesRegex(ValueError, "invalid solver name"):
+            load_solver("../prompt", "model")
 
 
 if __name__ == "__main__":

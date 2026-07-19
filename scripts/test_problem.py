@@ -1,5 +1,6 @@
 import json
 
+from solution import load_solver
 from utils.uoj_api import SubmissionRequest, Client
 from utils.solver import GenerationInput, resolve_solver, solver_metadata
 
@@ -63,6 +64,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
+    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--problem_idx', type=int, default=0, help='The index of problem that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -74,7 +76,8 @@ if __name__ == '__main__':
     problem_id = problem['problem_id']
     problem_statement = problem['statement_en'] if not args.chinese else problem['statement_zh']
 
-    score, message, result, full_msg, usage = TestProblem(args.model, problem_id, problem_statement,
+    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    score, message, result, full_msg, usage = TestProblem(solver, problem_id, problem_statement,
                                                           args.chinese, solver_metadata(problem))
 
     print(json.dumps({

@@ -1,5 +1,6 @@
 import json
 
+from solution import load_solver
 from utils.uoj_api import SubmissionRequest, Client
 from utils.solver import HackingInput, resolve_solver, solver_metadata
 
@@ -76,6 +77,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/hacks.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
+    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--hack_idx', type=int, default=0, help='The index of hack that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -98,7 +100,8 @@ if __name__ == '__main__':
     submission_language = hack['language']
     problem_statement = problems_by_id[problem_id]
 
-    score, message, result, full_msg, usage = TestHack(args.model, problem_id, problem_statement,
+    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    score, message, result, full_msg, usage = TestHack(solver, problem_id, problem_statement,
                                                        submission_code, submission_language,
                                                        args.chinese, solver_metadata(hack))
 

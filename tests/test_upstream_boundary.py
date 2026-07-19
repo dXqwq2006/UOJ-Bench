@@ -19,6 +19,8 @@ ADDED = {
     ".gitignore",
     "README_SOLVER.md",
     "requirements.txt",
+    "solution/__init__.py",
+    "solution/prompt/__init__.py",
     "tests/test_call_llm.py",
     "tests/test_solver.py",
     "tests/test_tasks.py",

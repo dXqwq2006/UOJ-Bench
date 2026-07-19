@@ -25,6 +25,31 @@ and applies the exact upstream fence parser. It returns `SolutionCandidate`,
 same `Solver` protocol and return the same candidate types without emitting
 Markdown.
 
+## Pipeline directories
+
+Each immediate subdirectory of `solution/` is one solver pipeline. It exports a
+single factory from `__init__.py`:
+
+```python
+def build_solver(model: str) -> Solver:
+    ...
+```
+
+`solution/prompt/` is the directory-based form of the baseline `PromptSolver`.
+New pipelines need no central registry entry; the CLI imports the directory by
+name and passes `--model` to its factory.
+
+```bash
+python -m scripts.test_hack_agent \
+  --solver prompt \
+  --model gpt-5.5 \
+  --hack_idx 0 \
+  --max_trials 5
+```
+
+All five task CLIs accept `--solver`. Omitting it preserves the original
+model-string behavior.
+
 Direct tasks request one turn. The hacking and repair agent scripts keep their
 UOJ-owned trial loops and pass parser, local validation, and judge rejection
 feedback back to the session. Correct reference code and hidden error labels are
