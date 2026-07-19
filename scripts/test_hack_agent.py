@@ -3,12 +3,14 @@ import json
 import time
 
 from solution import load_solver
-from solution.api import FeedbackKind, HackingInput, SolverFeedback
+from solution.api import FeedbackKind, HackingInput, SolverFeedback, require_solver_support
 from utils.benchmark import solver_metadata
 from utils.uoj_api import APIError, SubmissionRequest, Client
 
 def TestHackAgent(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
                   max_trials=10, metadata=None):
+    require_solver_support(solver, "hacking", feedback=max_trials > 1)
+
     # Initialize UOJ client
     client = Client()
     results=[]

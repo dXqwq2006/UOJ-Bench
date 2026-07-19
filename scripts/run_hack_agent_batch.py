@@ -17,6 +17,7 @@ from typing import Any, Iterable, Mapping
 
 from solution import load_solver
 from utils.benchmark import solver_metadata
+from solution.api import require_solver_support
 
 
 SCHEMA_VERSION = 1
@@ -81,6 +82,10 @@ class _TrialCountingSolver:
     def __init__(self, solver: Any):
         self.solver = solver
         self.session: _TrialCountingSession | None = None
+
+    @property
+    def capabilities(self) -> Any:
+        return getattr(self.solver, "capabilities", None)
 
     def start_hacking(self, task: Any) -> _TrialCountingSession:
         self.session = _TrialCountingSession(self.solver.start_hacking(task))
@@ -447,6 +452,11 @@ def run_batch(
     dataset_path = Path(dataset_dir).resolve()
     result_path = Path(result_dir).resolve()
     samples = load_samples(dataset_path, split, smoke_per_split)
+    if not (result_path / "manifest.json").exists():
+        require_solver_support(
+            load_solver(solver_name, model), "hacking", feedback=max_trials > 1
+        )
+
     identity = _run_identity(
         samples, dataset_path, split, solver_name, model, max_trials, smoke_per_split
     )

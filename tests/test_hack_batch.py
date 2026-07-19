@@ -5,6 +5,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
+from solution.api import SolverCapabilities
 from scripts import run_hack_agent_batch as batch
 
 
@@ -400,6 +401,35 @@ class RunnerTests(unittest.TestCase):
             self.assertTrue(summary["budget"]["stopped"])
             self.assertEqual(summary["budget"]["actual_cost_usd"], 1.0)
 
+    def test_one_shot_solver_rejects_agent_batch_before_side_effects(self):
+        class OneShotSolver:
+            capabilities = SolverCapabilities(hacking_feedback=False)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset = root / "dataset"
+            dataset.mkdir()
+            write_dataset(dataset)
+            result_dir = root / "results"
+
+            with (
+                patch.object(batch, "load_solver", return_value=OneShotSolver()) as load,
+                patch.object(
+                    batch,
+                    "_test_hack_agent",
+                    side_effect=AssertionError("evaluation must not start"),
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "max_trials must be 1"):
+                    batch.run_batch(
+                        dataset_dir=dataset,
+                        result_dir=result_dir,
+                        split="hard",
+                        solver_name="testcase_eval",
+                        model="test-model",
+                        max_trials=2,
+                        progress=False,
+                    )
 
 if __name__ == "__main__":
     unittest.main()

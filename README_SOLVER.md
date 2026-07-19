@@ -99,6 +99,33 @@ Set `GPT_OSS_BASE_URL` to route `gpt-oss-120b` to a local OpenAI-compatible
 server instead of OpenRouter. `GPT_OSS_API_KEY` is optional and defaults to
 `local`; `GPT_OSS_MAX_OUTPUT_TOKENS` defaults to 65536.
 
+## TestCase-Eval Task 2
+
+`testcase_eval` adapts the paper's Task 2 fault-exposure CoT prompt to the
+UOJ hacking contract. It accepts an English problem statement and one buggy
+submission, asks for one raw test input, then deterministically wraps that input
+as the Python generator required by UOJ-Bench. The fixed instruction text comes
+from the public [Task 2 dataset](https://huggingface.co/datasets/Raywithyou/TestCase-Eval-Task2).
+Generation, repair, Chinese statements, and feedback-driven retries are
+unsupported.
+
+The parser follows TestCase-Eval's deterministic extraction order: a
+`plaintext` fence, then a generic fence, with optional `<answer>` wrapping. It
+does not use the upstream extractor's secondary LLM fallback. Malformed output
+is therefore an ordinary failed one-shot attempt.
+
+```bash
+python -m scripts.run_hack_agent_batch \
+  --split all --smoke-per-split 5 \
+  --solver testcase_eval --model gpt-5.6-sol \
+  --max-trials 1 --workers 2 \
+  --result-dir /path/to/results
+```
+
+Any `--max-trials` value above 1 is rejected before model or UOJ calls. Results
+should be labeled as TestCase-Eval Task 2 adapted to UOJ-Bench, not as a
+reproduction of the paper's Codeforces benchmark.
+
 ## Hacking batches
 
 The batch runner uses the official Hacking Easy and Hard inputs. Easy is the

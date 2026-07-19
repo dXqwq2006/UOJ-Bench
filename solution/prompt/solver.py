@@ -12,6 +12,7 @@ from solution.api import (
     PatchCandidate,
     RepairInput,
     SolutionCandidate,
+    SolverCapabilities,
     SolverFeedback,
     SolverSession,
     SolverTurn,
@@ -30,6 +31,8 @@ def _default_call_details(message: Any, model: str) -> Any:
 
 class PromptSolver:
     """Send the benchmark prompt to one model and apply its official parser."""
+
+    capabilities = SolverCapabilities()
 
     def __init__(self, model: str, call_details: Optional[CallDetails] = None):
         self.model = model

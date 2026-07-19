@@ -49,6 +49,16 @@ class PatchCandidate:
     patch: str
 
 
+@dataclass(frozen=True)
+class SolverCapabilities:
+    generation: bool = True
+    hacking: bool = True
+    repair: bool = True
+    generation_feedback: bool = False
+    hacking_feedback: bool = True
+    repair_feedback: bool = True
+
+
 class FeedbackKind(str, Enum):
     INVALID_OUTPUT = "invalid_output"
     PATCH_ERROR = "patch_error"
@@ -92,6 +102,10 @@ class SolverSession(Protocol, Generic[CandidateT]):
 
 
 class Solver(Protocol):
+    @property
+    def capabilities(self) -> SolverCapabilities:
+        ...
+
     def start_generation(self, task: GenerationInput) -> SolverSession[SolutionCandidate]:
         ...
 
@@ -100,3 +114,26 @@ class Solver(Protocol):
 
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
         ...
+
+
+def solver_capabilities(solver: Any) -> SolverCapabilities:
+    """Return declared capabilities, defaulting old solvers to current behavior."""
+    capabilities = getattr(solver, "capabilities", None)
+    if capabilities is None:
+        return SolverCapabilities()
+    if not isinstance(capabilities, SolverCapabilities):
+        raise TypeError("solver capabilities must be a SolverCapabilities instance")
+    return capabilities
+
+
+def require_solver_support(solver: Any, task: str, *, feedback: bool = False) -> None:
+    if task not in {"generation", "hacking", "repair"}:
+        raise ValueError(f"unknown solver task: {task}")
+
+    capabilities = solver_capabilities(solver)
+    if not getattr(capabilities, task):
+        raise ValueError(f"{type(solver).__name__} does not support {task}")
+    if feedback and not getattr(capabilities, f"{task}_feedback"):
+        raise ValueError(
+            f"{type(solver).__name__} supports one-shot {task} only; max_trials must be 1"
+        )
