@@ -8,12 +8,14 @@ turns a task into a candidate artifact.
 UOJ-Bench task -> Solver session -> typed candidate -> original UOJ evaluation
 ```
 
-`solution/api.py` defines three entry points:
+`solution/api.py` defines five entry points:
 
 ```python
 solver.start_generation(task).next()
 solver.start_hacking(task).next(feedback)
 solver.start_repair(task).next(feedback)
+solver.start_fault_coverage(task).next()
+solver.start_fault_exposure(task).next()
 ```
 
 Agent runners record feedback as soon as it is produced, then request the next
@@ -67,7 +69,7 @@ use TATU's native protocols:
 - `gpt-5.6-sol`
 - `claude-fable-5`
 
-Set `TATU_API_KEY`; optionally set `TATU_BASE_URL`,
+Set `TATU_API_KEY`; optionally set `TATU_BASE_URL`, `TATU_TEMPERATURE`,
 `TATU_MAX_OUTPUT_TOKENS`, or `TATU_TIMEOUT_SECONDS`. OpenAI-protocol models also
 accept `TATU_REASONING_EFFORT`; use `xhigh` for formal `gpt-5.6-sol` runs and
 label their configuration accordingly. The adapter also normalizes the legacy
@@ -99,32 +101,54 @@ Set `GPT_OSS_BASE_URL` to route `gpt-oss-120b` to a local OpenAI-compatible
 server instead of OpenRouter. `GPT_OSS_API_KEY` is optional and defaults to
 `local`; `GPT_OSS_MAX_OUTPUT_TOKENS` defaults to 65536.
 
-## TestCase-Eval Task 2
+## TestCase-Eval
 
-`testcase_eval` adapts the paper's Task 2 fault-exposure CoT prompt to the
-UOJ hacking contract. It accepts an English problem statement and one buggy
-submission, asks for one raw test input, then deterministically wraps that input
-as the Python generator required by UOJ-Bench. The fixed instruction text comes
-from the public [Task 2 dataset](https://huggingface.co/datasets/Raywithyou/TestCase-Eval-Task2).
-Generation, repair, Chinese statements, and feedback-driven retries are
-unsupported.
+The `testcase_eval` policy implements both paper tasks: problem-level Fault
+Coverage (20 independent generations) and submission-targeted Fault Exposure
+(one generation). The prompt snapshots, data revisions, extraction regex,
+fixed `gpt-4.1-mini` fallback, oracle consensus, output comparator, and scoring
+are pinned to TestCase-Eval commit `45275c6`. The existing `prompt` policy is
+available as an additional Task 2 control; its output remains a Python generator.
 
-The parser follows TestCase-Eval's deterministic extraction order: a
-`plaintext` fence, then a generic fence, with optional `<answer>` wrapping. It
-does not use the upstream extractor's secondary LLM fallback. Malformed output
-is therefore an ordinary failed one-shot attempt.
+The reproduction is offline after dataset download. It runs generated inputs
+against the Codeforces submissions in a network-disabled, non-root Docker
+container and never calls UOJ. SQLite stores every prompt, raw response,
+candidate, usage record, materialized input, and execution result with stable
+resume keys. Request failures are recorded and are retried only with
+`--retry-errors`.
+
+For a three-problem GPT-5.6 smoke using both Task 2 policies:
 
 ```bash
-python -m scripts.run_hack_agent_batch \
-  --split all --smoke-per-split 5 \
-  --solver testcase_eval --model gpt-5.6-sol \
-  --max-trials 1 --workers 2 \
-  --result-dir /path/to/results
+export TATU_API_KEY=...
+export TATU_OPENAI_TRANSPORT=responses
+export TATU_BASE_URL=https://maas.tatucloud.com/deployer/coding_tatu/v1
+export TATU_DEPLOYER=CODING_TATU
+export TATU_REASONING_EFFORT=xhigh
+export TATU_MAX_OUTPUT_TOKENS=18000
+export TATU_TEMPERATURE=1.0
+export TATU_TIMEOUT_SECONDS=1200
+
+RESULT=results/testcase-eval/gpt-5.6-sol-smoke
+python -m scripts.run_testcase_eval_batch --phase prepare \
+  --result-dir "$RESULT" --smoke-problems 3
+python -m scripts.run_testcase_eval_batch --phase preflight \
+  --result-dir "$RESULT" --model gpt-5.6-sol --paper
+python -m scripts.run_testcase_eval_batch --phase generate \
+  --result-dir "$RESULT" --model gpt-5.6-sol --paper --workers 16 \
+  --policy testcase_eval --policy prompt
+python -m scripts.run_testcase_eval_batch --phase judge \
+  --result-dir "$RESULT" --workers 64
+python -m scripts.run_testcase_eval_batch --phase stats \
+  --result-dir "$RESULT"
 ```
 
-Any `--max-trials` value above 1 is rejected before model or UOJ calls. Results
-should be labeled as TestCase-Eval Task 2 adapted to UOJ-Bench, not as a
-reproduction of the paper's Codeforces benchmark.
+The smoke makes 180 main-model calls: 60 Task 1, 60 official Task 2, and 60
+UOJ-prompt Task 2 calls, plus fallback calls only for malformed responses. A
+full official run uses 20,000 main calls and 2,493,220 submission executions.
+Adding the UOJ Task 2 control raises this to 30,000 calls and 2,558,720
+executions, plus 10,000 generator materializations. Remove `--smoke-problems`
+and use a fresh result directory for that run.
 
 ## Hacking batches
 

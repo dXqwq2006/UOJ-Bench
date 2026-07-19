@@ -24,8 +24,12 @@ ADDED = {
     ".github/workflows/tests.yml",
     ".gitignore",
     "README_SOLVER.md",
+    "docker/testcase_eval.Dockerfile",
     "requirements.txt",
     "scripts/run_hack_agent_batch.py",
+    "scripts/run_testcase_eval_batch.py",
+    "scripts/test_testcase_eval_task1.py",
+    "scripts/test_testcase_eval_task2.py",
     "solution/llm/__init__.py",
     "solution/llm/call_llm.py",
     "solution/__init__.py",
@@ -41,10 +45,13 @@ ADDED = {
     "tests/test_hack_batch.py",
     "tests/test_solver.py",
     "tests/test_testcase_eval.py",
+    "tests/test_testcase_eval_benchmark.py",
     "tests/test_tasks.py",
     "tests/test_upstream_boundary.py",
     "tests/test_upstream_differential.py",
     "utils/benchmark.py",
+    "utils/testcase_eval_benchmark.py",
+    "utils/testcase_eval_executor.py",
 }
 
 
