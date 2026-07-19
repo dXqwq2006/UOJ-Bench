@@ -36,7 +36,7 @@ _GENERIC_FENCE_PATTERN = re.compile(r"```\s*(.*?)```", re.DOTALL)
 
 _EXTRACTOR_PROMPT = """You are given an LLM-generated response to a test-input-generation task.
 
-**Your job:**
+**Your job:**\x20
 Extract the *complete, valid, and effective* test input from the response, even if the response does not strictly follow the expected ` ```plaintext ... ``` ` format.
 The test input is usually the actual data or values to be given to the algorithm, not code or explanations.
 Sometimes the LLM response may have formatting errors, be missing code blocks, or present the test input in plain text.

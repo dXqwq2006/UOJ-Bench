@@ -1,3 +1,4 @@
+import hashlib
 import subprocess
 import sys
 import unittest
@@ -20,7 +21,7 @@ from solution.api import (
     solver_capabilities,
 )
 from solution.testcase_eval import TestCaseEvalSolver
-from solution.testcase_eval.solver import extract_test_input
+from solution.testcase_eval.solver import _EXTRACTOR_PROMPT, extract_test_input
 
 
 class FakeCaller:
@@ -45,6 +46,13 @@ def hacking_input(**overrides):
 
 
 class TestCaseEvalSolverTests(unittest.TestCase):
+    def test_fallback_extractor_prompt_matches_official_source(self):
+        self.assertEqual(len(_EXTRACTOR_PROMPT), 1504)
+        self.assertEqual(
+            hashlib.sha256(_EXTRACTOR_PROMPT.encode()).hexdigest(),
+            "3bef9a5985bc9bfd56dc3fb196cd1dcc6a7dd9cc2376e216fdc1a9977824204e",
+        )
+
     def test_prompt_parsing_and_generator_are_one_model_call(self):
         caller = FakeCaller("analysis\n```plaintext\n2\n1 2\n```")
         session = TestCaseEvalSolver("model", caller).start_hacking(hacking_input())
