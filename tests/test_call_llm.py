@@ -197,7 +197,7 @@ class CallLlmTests(unittest.TestCase):
                 "max_tokens": 65536,
                 "stream": False,
             },
-            timeout=900,
+            timeout=3600,
         )
         session.mount.assert_not_called()
         message = result["choices"][0]["message"]
@@ -246,6 +246,135 @@ class CallLlmTests(unittest.TestCase):
                 "reasoning_effort_requested": "max",
             },
         )
+
+    def test_openai_responses_uses_coding_deployer_and_native_history(self):
+        old_output = [
+            {
+                "type": "reasoning",
+                "id": "reasoning-old",
+                "encrypted_content": "encrypted-old",
+                "summary": [],
+            },
+            {
+                "type": "message",
+                "id": "message-old",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "old answer"}],
+            },
+        ]
+        new_output = [
+            {
+                "type": "reasoning",
+                "id": "reasoning-new",
+                "encrypted_content": "encrypted-new",
+                "summary": [{"type": "summary_text", "text": "new thought"}],
+            },
+            {
+                "type": "message",
+                "id": "message-new",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "new "},
+                    {"type": "output_text", "text": "answer"},
+                ],
+            },
+        ]
+        raw = {
+            "model": "gpt-5.6-sol",
+            "status": "completed",
+            "output": new_output,
+            "usage": {
+                "input_tokens": 17,
+                "input_tokens_details": {"cached_tokens": 11},
+                "output_tokens": 23,
+                "output_tokens_details": {"reasoning_tokens": 19},
+                "total_tokens": 40,
+            },
+            "debug": "tatu-secret",
+        }
+        context, session = self.tatu_session(raw)
+        history = [
+            {"role": "user", "content": "first"},
+            {
+                "role": "assistant",
+                "content": "ignored",
+                "provider": "openai-responses",
+                "native_turn": {"output": old_output},
+            },
+            {"role": "user", "content": "again"},
+        ]
+        original = copy.deepcopy(history)
+        with patch.dict(
+            os.environ,
+            {
+                "TATU_API_KEY": "tatu-secret",
+                "TATU_BASE_URL": "https://tatu.test/deployer/coding_tatu/v1/",
+                "TATU_OPENAI_TRANSPORT": "responses",
+                "TATU_DEPLOYER": "CODING_TATU",
+                "TATU_REASONING_EFFORT": "xhigh",
+                "TATU_TIMEOUT_SECONDS": "1200",
+            },
+            clear=False,
+        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+            result = call_llm.call_llm_full(history, "gpt-5.6-sol")
+
+        self.assertEqual(history, original)
+        session.post.assert_called_once_with(
+            "https://tatu.test/deployer/coding_tatu/v1/responses",
+            headers={
+                "Authorization": "Bearer tatu-secret",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-5.6-sol@CODING_TATU",
+                "input": [
+                    {"role": "user", "content": "first"},
+                    *old_output,
+                    {"role": "user", "content": "again"},
+                ],
+                "store": False,
+                "max_output_tokens": 65536,
+                "reasoning": {"effort": "xhigh"},
+            },
+            timeout=1200,
+        )
+        message = result["choices"][0]["message"]
+        self.assertEqual(message["content"], "new answer")
+        self.assertEqual(message["reasoning_content"], "new thought")
+        self.assertEqual(message["provider"], "openai-responses")
+        self.assertEqual(message["native_turn"], {"output": new_output})
+        self.assertEqual(
+            result["usage"],
+            {
+                "prompt_tokens": 17,
+                "completion_tokens": 23,
+                "total_tokens": 40,
+                "prompt_tokens_details": {"cached_tokens": 11},
+                "completion_tokens_details": {"reasoning_tokens": 19},
+            },
+        )
+        self.assertEqual(
+            result["request_config"],
+            {
+                "transport": "responses",
+                "request_model": "gpt-5.6-sol@CODING_TATU",
+                "deployer": "CODING_TATU",
+                "max_output_tokens": 65536,
+                "reasoning_effort": "xhigh",
+                "reasoning_effort_requested": "xhigh",
+                "store": False,
+            },
+        )
+        self.assertNotIn("tatu-secret", repr(result))
+
+    def test_openai_transport_must_be_explicitly_supported(self):
+        with patch.dict(
+            os.environ,
+            {"TATU_API_KEY": "key", "TATU_OPENAI_TRANSPORT": "response"},
+            clear=False,
+        ):
+            with self.assertRaisesRegex(ValueError, "unsupported TATU OpenAI transport"):
+                call_llm.call_llm_full("question", "gpt-5.6-sol")
 
     def test_anthropic_native_history_and_normalization(self):
         blocks = [

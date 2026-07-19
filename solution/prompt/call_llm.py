@@ -99,7 +99,7 @@ def _post(url: str, headers: dict[str, str], payload: dict[str, Any], secret: st
             url,
             headers=headers,
             json=payload,
-            timeout=_env_float("TATU_TIMEOUT_SECONDS", 900, 1, 900),
+            timeout=_env_float("TATU_TIMEOUT_SECONDS", 900, 1, 3600),
         )
     response.raise_for_status()
     data = response.json()
@@ -133,6 +133,64 @@ def _openai_messages(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         else:
             messages.append({"role": str(item["role"]), "content": _text(item.get("content"))})
     return messages
+
+
+def _responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    items = []
+    for item in history:
+        native = item.get("native_turn")
+        output = native.get("output") if isinstance(native, dict) else None
+        if (
+            item.get("role") == "assistant"
+            and item.get("provider") == "openai-responses"
+            and isinstance(output, list)
+        ):
+            items.extend(copy.deepcopy(output))
+        else:
+            items.append({"role": str(item["role"]), "content": _text(item.get("content"))})
+    return items
+
+
+def _responses_output_text(raw: dict[str, Any]) -> str:
+    parts = []
+    output = raw.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            content = item.get("content")
+            if not isinstance(content, list):
+                continue
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "output_text":
+                    continue
+                text = block.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+    if not parts and isinstance(raw.get("output_text"), str):
+        parts.append(raw["output_text"])
+    if not parts:
+        raise RuntimeError("TATU Responses response has no output_text")
+    return "".join(parts)
+
+
+def _responses_reasoning_content(raw: dict[str, Any]) -> str:
+    parts = []
+    output = raw.get("output")
+    if not isinstance(output, list):
+        return ""
+    for item in output:
+        if not isinstance(item, dict) or item.get("type") != "reasoning":
+            continue
+        for key in ("summary", "content"):
+            blocks = item.get(key)
+            if not isinstance(blocks, list):
+                continue
+            for block in blocks:
+                text = block.get("text") if isinstance(block, dict) else None
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+    return "\n\n".join(parts)
 
 
 def _anthropic_messages(history: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
@@ -185,6 +243,21 @@ def _usage(provider: str, raw: Any) -> dict[str, Any]:
     raw = raw if isinstance(raw, dict) else {}
     if provider == "openai":
         return copy.deepcopy(raw)
+    if provider == "openai-responses":
+        prompt = int(raw.get("input_tokens", 0) or 0)
+        completion = int(raw.get("output_tokens", 0) or 0)
+        usage = {
+            "prompt_tokens": prompt,
+            "completion_tokens": completion,
+            "total_tokens": int(raw.get("total_tokens", 0) or prompt + completion),
+        }
+        input_details = raw.get("input_tokens_details")
+        if isinstance(input_details, dict):
+            usage["prompt_tokens_details"] = copy.deepcopy(input_details)
+        output_details = raw.get("output_tokens_details")
+        if isinstance(output_details, dict):
+            usage["completion_tokens_details"] = copy.deepcopy(output_details)
+        return usage
     if provider == "anthropic":
         prompt = int(raw.get("input_tokens", 0) or 0)
         completion = int(raw.get("output_tokens", 0) or 0)
@@ -278,6 +351,59 @@ def _call_openai(history, model, key, base, max_tokens):
             "max_tokens_parameter": token_parameter,
             "reasoning_effort": reasoning_effort or None,
             "reasoning_effort_requested": requested_effort or None,
+        },
+    )
+
+
+def _call_openai_responses(history, model, key, base, max_tokens):
+    deployer = os.environ.get("TATU_DEPLOYER", "").strip()
+    request_model = model if not deployer or "@" in model else f"{model}@{deployer}"
+    requested_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
+    reasoning_effort = (
+        "xhigh"
+        if model == "gpt-5.6-sol" and requested_effort == "max"
+        else requested_effort
+    )
+    payload = {
+        "model": request_model,
+        "input": _responses_input(history),
+        "store": False,
+        "max_output_tokens": max_tokens,
+    }
+    if reasoning_effort:
+        payload["reasoning"] = {"effort": reasoning_effort}
+    raw = _post(
+        f"{base}/responses",
+        {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        payload,
+        key,
+    )
+    output = raw.get("output")
+    if not isinstance(output, list):
+        raise RuntimeError("TATU Responses response has no output items")
+    incomplete = raw.get("incomplete_details")
+    finish_reason = (
+        incomplete.get("reason")
+        if raw.get("status") == "incomplete" and isinstance(incomplete, dict)
+        else raw.get("status")
+    )
+    return _result(
+        model,
+        "openai-responses",
+        raw,
+        _responses_output_text(raw),
+        _responses_reasoning_content(raw),
+        {"output": copy.deepcopy(output)},
+        finish_reason,
+        raw.get("usage"),
+        {
+            "transport": "responses",
+            "request_model": request_model,
+            "deployer": deployer or None,
+            "max_output_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort or None,
+            "reasoning_effort_requested": requested_effort or None,
+            "store": False,
         },
     )
 
@@ -412,6 +538,11 @@ def call_llm_full(message, m):
     key, base, max_tokens = _tatu_settings()
     history = generate_messages(message)
     if provider == "openai":
+        transport = os.environ.get("TATU_OPENAI_TRANSPORT", "chat-completions").strip()
+        if transport == "responses":
+            return _call_openai_responses(history, m, key, base, max_tokens)
+        if transport != "chat-completions":
+            raise ValueError(f"unsupported TATU OpenAI transport: {transport}")
         return _call_openai(history, m, key, base, max_tokens)
     if provider == "anthropic":
         return _call_anthropic(history, m, key, base, max_tokens)

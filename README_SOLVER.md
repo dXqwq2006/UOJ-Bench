@@ -72,6 +72,23 @@ label their configuration accordingly. The adapter also normalizes the legacy
 value `max` to the transmitted value `xhigh` and uses `max_completion_tokens`.
 The normalized response records both the requested and transmitted settings.
 
+TATU's discounted Coding deployer uses the Responses API rather than the
+ordinary chat-completions route. Configure all of its routing fields together:
+
+```bash
+export TATU_OPENAI_TRANSPORT=responses
+export TATU_BASE_URL=https://maas.tatucloud.com/deployer/coding_tatu/v1
+export TATU_DEPLOYER=CODING_TATU
+export TATU_REASONING_EFFORT=xhigh
+export TATU_TIMEOUT_SECONDS=1200
+```
+
+This sends `gpt-5.6-sol@CODING_TATU` to `POST <base>/responses`, records the
+effective route in `request_config`, and preserves provider-native Responses
+output items between agent rounds. Treat this as a distinct deployment when
+comparing or resuming runs; do not mix its records into a chat-completions
+result directory. Confirm the discounted rate in TATU's billing records.
+
 TATU generation POSTs are not retried inside the call adapter. This keeps one
 recorded model turn equal to one potentially billable request. The Agent runners
 retain upstream's outer-round exception and trial behavior.
