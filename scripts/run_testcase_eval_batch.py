@@ -77,9 +77,6 @@ def _preflight(model: str, paper: bool) -> dict[str, object]:
         ),
         model,
     )
-    extracted, extractor_message, extractor_usage = extract_test_input_llm(
-        "Test Input:\n1"
-    )
     request_config = message.get("request_config", {})
     if paper and model == "gpt-5.6-sol":
         expected = {
@@ -95,6 +92,15 @@ def _preflight(model: str, paper: bool) -> dict[str, object]:
         }
         if mismatches:
             raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
+    try:
+        extracted, extractor_message, extractor_usage = extract_test_input_llm(
+            "Test Input:\n1"
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "fixed gpt-4.1-mini extractor preflight failed; "
+            "the strict benchmark is blocked"
+        ) from exc
     if extracted.strip() != "1":
         raise RuntimeError(f"extractor preflight returned {extracted!r}")
     return {

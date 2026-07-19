@@ -1,8 +1,9 @@
-import json
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from scripts import run_testcase_eval_batch
 
 from utils.testcase_eval_benchmark import (
     RunStore,
@@ -167,6 +168,21 @@ class StoreAndScoreTests(unittest.TestCase):
                 task2 = summary["policies"]["testcase_eval"]["task2"]
                 self.assertEqual((task2["killed"], task2["total"], task2["ratio"]), (1, 1, 1.0))
                 self.assertEqual(summary["usage"]["testcase_eval"]["1"]["total_tokens"], 10)
+
+
+class PreflightTests(unittest.TestCase):
+    def test_fixed_extractor_failure_blocks_the_strict_run(self):
+        with patch(
+            "solution.llm.call_llm.call_llm_details",
+            return_value=("response", {"request_config": {}}, {}),
+        ), patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            side_effect=RuntimeError("model unavailable"),
+        ):
+            with self.assertRaisesRegex(
+                RuntimeError, "strict benchmark is blocked"
+            ):
+                run_testcase_eval_batch._preflight("model", paper=False)
 
 
 class ExecutorTests(unittest.TestCase):

@@ -128,6 +128,8 @@ export TATU_REASONING_EFFORT=xhigh
 export TATU_MAX_OUTPUT_TOKENS=18000
 export TATU_TEMPERATURE=1.0
 export TATU_TIMEOUT_SECONDS=1200
+export TESTCASE_EVAL_EXTRACTOR_API_KEY=...
+export TESTCASE_EVAL_EXTRACTOR_BASE_URL=https://api.openai.com/v1
 
 RESULT=results/testcase-eval/gpt-5.6-sol-smoke
 python -m scripts.run_testcase_eval_batch --phase prepare \
@@ -142,6 +144,10 @@ python -m scripts.run_testcase_eval_batch --phase judge \
 python -m scripts.run_testcase_eval_batch --phase stats \
   --result-dir "$RESULT"
 ```
+
+The extractor endpoint must support `POST /responses`, structured JSON output,
+and the exact `gpt-4.1-mini` model. Preflight fails closed when that model is
+unavailable; do not substitute another extractor in a paper-labeled run.
 
 The smoke makes 180 main-model calls: 60 Task 1, 60 official Task 2, and 60
 UOJ-prompt Task 2 calls, plus fallback calls only for malformed responses. A
