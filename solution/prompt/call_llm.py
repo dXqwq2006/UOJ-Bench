@@ -349,6 +349,14 @@ def _call_anthropic(history, model, key, base, max_tokens):
 def _call_gemini(history, model, key, base, max_tokens):
     messages, system = _gemini_messages(history)
     payload = {"contents": messages, "generationConfig": {"maxOutputTokens": max_tokens}}
+    thinking_level = os.environ.get("TATU_GEMINI_THINKING_LEVEL", "").strip().upper()
+    if thinking_level:
+        if thinking_level not in {"LOW", "MEDIUM", "HIGH"}:
+            raise ValueError("TATU_GEMINI_THINKING_LEVEL must be low, medium, or high")
+        payload["generationConfig"]["thinkingConfig"] = {
+            "thinkingLevel": thinking_level,
+            "includeThoughts": True,
+        }
     if system:
         payload["systemInstruction"] = {"parts": system}
     origin = base.rstrip("/")
@@ -388,7 +396,11 @@ def _call_gemini(history, model, key, base, max_tokens):
         {"role": "model", "parts": copy.deepcopy(parts)},
         candidate.get("finishReason"),
         raw.get("usageMetadata"),
-        {"max_output_tokens": max_tokens},
+        {
+            "max_output_tokens": max_tokens,
+            "thinking_level": thinking_level or None,
+            "include_thoughts": bool(thinking_level),
+        },
     )
 
 

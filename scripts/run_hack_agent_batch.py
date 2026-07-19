@@ -21,6 +21,7 @@ from utils.benchmark import solver_metadata
 
 SCHEMA_VERSION = 1
 DEFAULT_PRICING = {
+    "gemini-3.1-pro-preview": (2.0, 12.0),
     "gpt-5.6-sol": (5.0, 30.0),
     "gpt-oss-120b": (0.0, 0.0),
 }
