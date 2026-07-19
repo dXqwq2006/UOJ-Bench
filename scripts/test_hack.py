@@ -1,63 +1,24 @@
 import json
 
+from solution import load_solver
+from solution.api import HackingInput
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
-from utils.call_llm import *
 
-prompt = """
-You are an expert at breaking buggy code. You will be given a buggy code and the complete description of the problem it intends to solve. Your task is to find a valid input, respecting the input format and constraints, that causes the code to fail (e.g., produces a Wrong Answer or exceeds the time limit).
-
-Write a python program to print this failing test-case. Enclose your code within delimiters as follows.
-```python
-# YOUR CODE HERE
-```
-
-### Question:
-{problem}
-
-### Code:
-{code}
-
-### Answer: (use the provided format with backticks)
-
-"""
-
-prompt_chinese = """
-你是一位精通算法竞赛的 hack 专家。你将拿到一道题目的题面以及对应的一份有错误的代码。你需要找到一份符合题面输入格式的合法输入，使得给定的代码不能通过这组测试数据（输出错误答案或超时）。
-
-给出一份 python 代码输出这组输入数据。你需要把你的代码包在如下格式的反引号中：
-
-```python
-# 你的代码
-```
-
-### 题面:
-{problem}
-
-### 代码:
-{code}
-
-### 答案: (使用给定的带反引号的格式)
-
-"""
-
-try_again_prompt = "\nTry again! Output a new python code which would generate the correct hack data."
-
-def TestHack(model, problem_id, problem_statement, submission_code, submission_language='C++20',
-             chinese=False):
+def TestHack(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
+             chinese=False, metadata=None):
     # Initialize UOJ client
     client = Client()
-    use_prompt = prompt_chinese if chinese else prompt
-    message = use_prompt.format(problem=problem_statement, code=submission_code)
-
-    assistant_message, full_msg, usage = call_llm_details(message, model)
-
-    # Extract code between ```python and ``` markers
-    import re
-    code_match = re.search(r'```python\n(.*?)```', assistant_message, re.DOTALL)
-    if code_match:
-        code = code_match.group(1)
-    else:
-        return 0, message, "no output hack data", full_msg, usage
+    task = HackingInput(problem_id, problem_statement, submission_code,
+                        submission_language=submission_language, chinese=chinese,
+                        metadata=metadata or {})
+    session = solver.start_hacking(task)
+    message = session.initial_request
+    turn = session.next()
+    full_msg, usage = turn.message, turn.usage
+    if turn.candidate is None:
+        return 0, message, turn.error, full_msg, usage
+    code = turn.candidate.generator
 
     sub = SubmissionRequest(problem_id=problem_id, type='hack')
     sub.addSourceCodeText("answer", submission_code, language=submission_language)
@@ -78,6 +39,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/hacks.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--hack_idx', type=int, default=0, help='The index of hack that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -100,9 +62,10 @@ if __name__ == '__main__':
     submission_language = hack['language']
     problem_statement = problems_by_id[problem_id]
 
-    score, message, result, full_msg, usage = TestHack(args.model, problem_id, problem_statement,
+    solver = load_solver(args.solver, args.model)
+    score, message, result, full_msg, usage = TestHack(solver, problem_id, problem_statement,
                                                        submission_code, submission_language,
-                                                       args.chinese)
+                                                       args.chinese, solver_metadata(hack))
 
     print(json.dumps({
         'hack_score': score,

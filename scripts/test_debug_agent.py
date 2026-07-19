@@ -1,42 +1,11 @@
 import requests
 import json
 
-from utils.call_llm import *
+from solution import load_solver
+from solution.api import FeedbackKind, RepairInput, SolverFeedback
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
 from utils.patch import *
-
-prompt = """
-You are an expert at fixing bugs in code. You will be given a buggy code and the complete description of the problem it intends to solve. Your job is to modify the code to make it correct while making as few changes as possible. The change must be expressed as a patch file that can be directly applied to the code using the patch command. Do not add any comments or explanations in the patch. Make sure your patch is minimal, i.e., the number of lines of code added or deleted is as small as possible. Enclose your patch within delimiters as follows.
-
-```patch
-# YOUR PATCH HERE
-```
-
-Here is an example of a patch file. It consists of changes to somean example code. It specifies the line numbers of each change, and the removed and added lines.
-
-```patch
-@@ -6,6 +6,6 @@
-     int sum = 0;
-     
--    for (int i = 0; i <= 5; i++) {{
-+    for (int i = 0; i < 5; i++) {{
-         sum += arr[i];
-     }}
-```
-
-
-### Question:
-{problem}
-
-### Code:
-{code}
-
-### Answer: (use the provided format with backticks)
-
-
-"""
-
-try_again_prompt = "\nTry again! Output a new patch which would be directly applied to the code given for the first time."
 
 import Levenshtein
 
@@ -45,7 +14,8 @@ def similarity(a: str, b: str) -> float:
     max_len = max(len(a), len(b))
     return 1 - dist / max_len
 
-def TestDebugAgent(model, problem_id, problem_statement, submission_code, submission_language='C++20', max_trials=10):
+def TestDebugAgent(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
+                   max_trials=10, metadata=None):
     submission_code = submission_code.replace('\r', '')
     # Initialize UOJ client
     client = Client()
@@ -53,51 +23,38 @@ def TestDebugAgent(model, problem_id, problem_statement, submission_code, submis
     full_msgs=[]
     usages=[]
     counted_trials = 0
-    message = prompt.format(problem=problem_statement, code=submission_code)
-    message = [{"role": "user", "content": message}]
+    task = RepairInput(problem_id, problem_statement, submission_code,
+                       submission_language=submission_language, metadata=metadata or {})
+    session = solver.start_repair(task)
     while counted_trials < max_trials:
         try:
-            # Make API request
-
-            full_msgs.append(message[-1])
-
-            assistant_message, full_msg, usage = call_llm_details(message, model)
-            message.append({"role": "assistant", "content": '[REASONING]' + full_msg['reasoning_content']})
-            message.append({"role": "assistant", "content": '[ANSWER]' + assistant_message})
-
-            full_msgs.append(full_msg)
-            usages.append(usage)
-
-            # Extract patch between ```patch and ``` markers
-            import re
-            patch_match = re.search(r'```patch\n(.*?)```', assistant_message, re.DOTALL)
-            if patch_match:
-                patch = patch_match.group(1)
-            else:
-                message.append({"role": "user", "content": "No patch block found in your response" + try_again_prompt})
-                counted_trials += 1  # counts as a trial
+            transcript = session.transcript
+            if transcript:
+                full_msgs.append(transcript[-1])
+            turn = session.next()
+            full_msgs.append(turn.message)
+            usages.append(turn.usage)
+            if turn.candidate is None:
+                session.record_feedback(SolverFeedback(FeedbackKind.INVALID_OUTPUT))
+                counted_trials += 1
                 continue
 
-            # apply patch to code
-            new_code = apply_patch_to_code(submission_code, patch)
+            new_code = apply_patch_to_code(submission_code, turn.candidate.patch)
             if similarity(new_code, submission_code) < 0.9:
-                message.append({"role": "user", "content": "You made too many changes" + try_again_prompt})
-                counted_trials += 1  # counts as a trial
+                session.record_feedback(SolverFeedback(FeedbackKind.SIMILARITY_REJECTION))
+                counted_trials += 1
                 continue
-            
+
             sub = SubmissionRequest(problem_id=problem_id, type='normal')
             sub.addSourceCodeText("answer", new_code, language=submission_language)
 
             result = client.makeBackgroundSubmission(sub)
             results.append(result)
             if 'result' in result and 'score' in result['result'] and result['result']['score'] == 100:
-                return 1, message, results, full_msgs, usages
-            else:
-                message.append({"role": "user",
-                                "content": f"The new code cannot pass all tests. Here is the results\n{result}\n\n" + try_again_prompt})
-                counted_trials += 1  # counts as a trial
-                continue
+                return 1, session.transcript, results, full_msgs, usages
 
+            session.record_feedback(SolverFeedback(FeedbackKind.JUDGE_REJECTED, result))
+            counted_trials += 1
         except requests.exceptions.RequestException as e:
             print(f"Trial {counted_trials + 1} failed with request error: {e}")
             continue
@@ -105,15 +62,15 @@ def TestDebugAgent(model, problem_id, problem_statement, submission_code, submis
             print(f"Trial {counted_trials + 1} failed with JSON parse error: {e}")
             continue
         except ValueError as e:
-            counted_trials += 1  # counts as a trial
-            message.append({"role": "user", "content": f"Meet error when applying patch: {e}" + try_again_prompt})
+            session.record_feedback(SolverFeedback(FeedbackKind.PATCH_ERROR, str(e)))
+            counted_trials += 1
             continue
         except Exception as e:
-            counted_trials += 1  # counts as a trial
-            message.append({"role": "user", "content": f"Meet error {e}" + try_again_prompt})
+            session.record_feedback(SolverFeedback(FeedbackKind.RUNTIME_ERROR, str(e)))
+            counted_trials += 1
             continue
     # If we get here, all trials failed
-    return 0, message, results, full_msgs, usages
+    return 0, session.transcript, results, full_msgs, usages
 
 if __name__ == '__main__':    
     import argparse
@@ -121,6 +78,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/small_submission_pairs.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--debug_idx', type=int, default=0, help='The index of debugging task that will be tested.')
     parser.add_argument('--max_trials', type=int, default=5, help='Max agent rounds.')
     args = parser.parse_args()
@@ -141,9 +99,10 @@ if __name__ == '__main__':
     problem_statement = problems_by_id[problem_id]
     submission_language = similar_code['language']
 
-    score, message, results, full_msgs, usages = TestDebugAgent(args.model, problem_id, problem_statement,
+    solver = load_solver(args.solver, args.model)
+    score, message, results, full_msgs, usages = TestDebugAgent(solver, problem_id, problem_statement,
                                                                 submission_code, submission_language,
-                                                                args.max_trials)
+                                                                args.max_trials, solver_metadata(similar_code))
 
     print(json.dumps({
         'debug_score': score,
