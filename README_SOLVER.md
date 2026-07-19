@@ -67,10 +67,10 @@ use TATU's native protocols:
 
 Set `TATU_API_KEY`; optionally set `TATU_BASE_URL`,
 `TATU_MAX_OUTPUT_TOKENS`, or `TATU_TIMEOUT_SECONDS`. OpenAI-protocol models also
-accept `TATU_REASONING_EFFORT`; set it explicitly for formal runs (for example,
-`max` for `gpt-5.6-sol`). For that model, the adapter sends the API's equivalent
-highest level, `xhigh`, and uses `max_completion_tokens`. The normalized response
-records both the requested and transmitted settings.
+accept `TATU_REASONING_EFFORT`; use `xhigh` for formal `gpt-5.6-sol` runs and
+label their configuration accordingly. The adapter also normalizes the legacy
+value `max` to the transmitted value `xhigh` and uses `max_completion_tokens`.
+The normalized response records both the requested and transmitted settings.
 
 TATU generation POSTs are not retried inside the call adapter. This keeps one
 recorded model turn equal to one potentially billable request. The Agent runners
