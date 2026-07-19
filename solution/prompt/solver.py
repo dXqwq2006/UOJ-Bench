@@ -23,7 +23,7 @@ CallDetails = Callable[[Any, str], Any]
 CandidateT = TypeVar("CandidateT")
 
 def _default_call_details(message: Any, model: str) -> Any:
-    from .call_llm import call_llm_details
+    from solution.llm.call_llm import call_llm_details
 
     return call_llm_details(message, model)
 
@@ -97,7 +97,7 @@ class _PromptSession(Generic[CandidateT]):
 
     def _append_assistant(self, raw_text: str, message: Any) -> None:
         if isinstance(message, Mapping) and message.get("native_turn"):
-            from .call_llm import assistant_history_message
+            from solution.llm.call_llm import assistant_history_message
 
             self.history.append(assistant_history_message(raw_text, message))
             return

@@ -33,9 +33,11 @@ def build_solver(model: str) -> Solver:
     ...
 ```
 
-`solution/prompt/` owns the complete baseline implementation: the original
-prompt text, `PromptSolver`, the official fence parser, retry-context rendering,
-and its TATU/OpenRouter adapter. Benchmark task inputs contain only raw problem
+`solution/prompt/` owns the complete baseline policy: the original prompt text,
+`PromptSolver`, the official fence parser, and retry-context rendering.
+`solution/llm/` owns the shared TATU/OpenRouter transports so prompt-compatible
+pipelines can compare policies under identical model settings. A pipeline may
+still supply its own model stack. Benchmark task inputs contain only raw problem
 data and public metadata. New pipelines need no central registry entry; the CLI
 imports the directory by name and passes `--model` to its factory.
 

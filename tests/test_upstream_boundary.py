@@ -26,6 +26,8 @@ ADDED = {
     "README_SOLVER.md",
     "requirements.txt",
     "scripts/run_hack_agent_batch.py",
+    "solution/llm/__init__.py",
+    "solution/llm/call_llm.py",
     "solution/__init__.py",
     "solution/api.py",
     "solution/prompt/__init__.py",

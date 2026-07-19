@@ -3,7 +3,7 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
-from solution.prompt import call_llm
+from solution.llm import call_llm
 
 
 class Response:
@@ -23,6 +23,13 @@ class CallLlmTests(unittest.TestCase):
         session = context.__enter__.return_value
         session.post.return_value = Response(payload)
         return context, session
+
+    def test_prompt_transport_compatibility_exports(self):
+        from solution.prompt import call_llm as legacy
+
+        self.assertIs(legacy.call_llm_full, call_llm.call_llm_full)
+        self.assertIs(legacy.call_llm_details, call_llm.call_llm_details)
+        self.assertIs(legacy.assistant_history_message, call_llm.assistant_history_message)
 
     def test_generate_messages_copies_history(self):
         history = [{"role": "user", "content": "question"}]
@@ -44,7 +51,7 @@ class CallLlmTests(unittest.TestCase):
             "echo": "key-openrouter",
         }
         with patch.dict(os.environ, {"OPENROUTER_KEY": "key-openrouter"}, clear=True), patch(
-            "solution.prompt.call_llm.requests.post", return_value=Response(raw)
+            "solution.llm.call_llm.requests.post", return_value=Response(raw)
         ) as post:
             result = call_llm.call_llm_full("question", "gpt-oss-120b")
 
@@ -93,7 +100,7 @@ class CallLlmTests(unittest.TestCase):
                 "GPT_OSS_MAX_OUTPUT_TOKENS": "12345",
             },
             clear=True,
-        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+        ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gpt-oss-120b")
 
         session.post.assert_called_once_with(
@@ -124,7 +131,7 @@ class CallLlmTests(unittest.TestCase):
             os.environ,
             {"GPT_OSS_BASE_URL": "http://127.0.0.1:8000/v1"},
             clear=True,
-        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+        ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full("question", "gpt-oss-120b")
 
         request = session.post.call_args.kwargs
@@ -172,7 +179,7 @@ class CallLlmTests(unittest.TestCase):
             "TATU_REASONING_EFFORT": "",
         }
         with patch.dict(os.environ, env, clear=False), patch(
-            "solution.prompt.call_llm.requests.Session", return_value=context
+            "solution.llm.call_llm.requests.Session", return_value=context
         ):
             result = call_llm.call_llm_full(history, "gpt-5.5")
 
@@ -230,7 +237,7 @@ class CallLlmTests(unittest.TestCase):
                 "TATU_BASE_URL": "https://tatu.test/v1",
                 "TATU_REASONING_EFFORT": "max",
             },
-        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+        ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full("question", "gpt-5.6-sol")
 
         payload = session.post.call_args.kwargs["json"]
@@ -315,7 +322,7 @@ class CallLlmTests(unittest.TestCase):
                 "TATU_TIMEOUT_SECONDS": "1200",
             },
             clear=False,
-        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+        ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gpt-5.6-sol")
 
         self.assertEqual(history, original)
@@ -404,7 +411,7 @@ class CallLlmTests(unittest.TestCase):
             {"role": "user", "content": "retry"},
         ]
         with patch.dict(os.environ, {"TATU_API_KEY": "key"}), patch(
-            "solution.prompt.call_llm.requests.Session", return_value=context
+            "solution.llm.call_llm.requests.Session", return_value=context
         ):
             result = call_llm.call_llm_full(history, "claude-fable-5")
 
@@ -459,7 +466,7 @@ class CallLlmTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {"TATU_API_KEY": "key", "TATU_BASE_URL": "https://tatu.test/v1beta/"},
-        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+        ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gemini-3.1-pro-preview")
 
         self.assertEqual(
@@ -516,7 +523,7 @@ class CallLlmTests(unittest.TestCase):
             "usage": {"total_tokens": 2},
             "raw_response": {"id": "response"},
         }
-        with patch("solution.prompt.call_llm.call_llm_full", return_value=normalized):
+        with patch("solution.llm.call_llm.call_llm_full", return_value=normalized):
             content, message, usage = call_llm.call_llm_details("question", "model")
         self.assertEqual(content, "answer")
         self.assertEqual(message["raw_response"], {"id": "response"})
