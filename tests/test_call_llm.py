@@ -316,11 +316,7 @@ class CallLlmTests(unittest.TestCase):
         ]
         with patch.dict(
             os.environ,
-            {
-                "TATU_API_KEY": "key",
-                "TATU_BASE_URL": "https://tatu.test/v1beta/",
-                "TATU_GEMINI_THINKING_LEVEL": "high",
-            },
+            {"TATU_API_KEY": "key", "TATU_BASE_URL": "https://tatu.test/v1beta/"},
         ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gemini-3.1-pro-preview")
 
@@ -332,10 +328,6 @@ class CallLlmTests(unittest.TestCase):
         self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "system"}]})
         self.assertEqual(payload["contents"][1]["role"], "model")
         self.assertEqual(payload["contents"][1]["parts"], old_parts)
-        self.assertEqual(
-            payload["generationConfig"]["thinkingConfig"],
-            {"thinkingLevel": "HIGH", "includeThoughts": True},
-        )
         message = result["choices"][0]["message"]
         self.assertEqual(message["content"], "public answer")
         self.assertEqual(message["reasoning_content"], "private thought")
@@ -348,10 +340,6 @@ class CallLlmTests(unittest.TestCase):
                 "total_tokens": 59,
                 "reasoning_tokens": 23,
             },
-        )
-        self.assertEqual(
-            result["request_config"],
-            {"max_output_tokens": 65536, "thinking_level": "HIGH", "include_thoughts": True},
         )
 
     def test_gemini_usage_falls_back_to_candidate_plus_thinking_tokens(self):

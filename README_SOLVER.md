@@ -69,8 +69,6 @@ Set `TATU_API_KEY`; optionally set `TATU_BASE_URL`,
 `TATU_MAX_OUTPUT_TOKENS`, or `TATU_TIMEOUT_SECONDS`. OpenAI-protocol models also
 accept `TATU_REASONING_EFFORT`; set it explicitly for formal runs (for example,
 `max` for `gpt-5.6-sol`). The normalized response records this request setting.
-Gemini formal runs set `TATU_GEMINI_THINKING_LEVEL=high`; this also requests
-thought summaries and preserves their signatures in subsequent agent turns.
 
 TATU generation POSTs are not retried inside the call adapter. This keeps one
 recorded model turn equal to one potentially billable request. The Agent runners
