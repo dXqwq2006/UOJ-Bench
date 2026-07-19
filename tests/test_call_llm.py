@@ -208,7 +208,12 @@ class CallLlmTests(unittest.TestCase):
         self.assertEqual(result["usage"]["total_tokens"], 12)
         self.assertEqual(
             result["request_config"],
-            {"max_output_tokens": 65536, "reasoning_effort": None},
+            {
+                "max_output_tokens": 65536,
+                "max_tokens_parameter": "max_tokens",
+                "reasoning_effort": None,
+                "reasoning_effort_requested": None,
+            },
         )
         self.assertNotIn("tatu-secret", repr(result))
 
@@ -228,10 +233,18 @@ class CallLlmTests(unittest.TestCase):
         ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full("question", "gpt-5.6-sol")
 
-        self.assertEqual(session.post.call_args.kwargs["json"]["reasoning_effort"], "max")
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["reasoning_effort"], "xhigh")
+        self.assertEqual(payload["max_completion_tokens"], 65536)
+        self.assertNotIn("max_tokens", payload)
         self.assertEqual(
             result["request_config"],
-            {"max_output_tokens": 65536, "reasoning_effort": "max"},
+            {
+                "max_output_tokens": 65536,
+                "max_tokens_parameter": "max_completion_tokens",
+                "reasoning_effort": "xhigh",
+                "reasoning_effort_requested": "max",
+            },
         )
 
     def test_anthropic_native_history_and_normalization(self):

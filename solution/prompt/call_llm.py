@@ -239,13 +239,15 @@ def _result(
 
 
 def _call_openai(history, model, key, base, max_tokens):
+    token_parameter = "max_completion_tokens" if model == "gpt-5.6-sol" else "max_tokens"
     payload = {
         "model": model,
         "messages": _openai_messages(history),
-        "max_tokens": max_tokens,
+        token_parameter: max_tokens,
         "stream": False,
     }
-    reasoning_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
+    requested_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
+    reasoning_effort = "xhigh" if model == "gpt-5.6-sol" and requested_effort == "max" else requested_effort
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
     raw = _post(
@@ -271,7 +273,12 @@ def _call_openai(history, model, key, base, max_tokens):
         native,
         choice.get("finish_reason"),
         raw.get("usage"),
-        {"max_output_tokens": max_tokens, "reasoning_effort": reasoning_effort or None},
+        {
+            "max_output_tokens": max_tokens,
+            "max_tokens_parameter": token_parameter,
+            "reasoning_effort": reasoning_effort or None,
+            "reasoning_effort_requested": requested_effort or None,
+        },
     )
 
 
