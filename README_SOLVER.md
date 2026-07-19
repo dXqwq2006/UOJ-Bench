@@ -117,6 +117,10 @@ usage, and UOJ results. Re-run with the same arguments and `--resume` to skip
 completed samples and retry interrupted ones. `summary.json` reports Pass@1
 through Pass@10 for each split and problem difficulty.
 
+UOJ `APIError` responses are infrastructure failures: agent runners do not turn
+them into model feedback or consume a trial. Batch runs persist the sample as
+`retryable_error`, and `--resume` evaluates it again when UOJ is available.
+
 Use `--split-schedule interleaved` for full runs so a slow tail in one official
 split does not prevent the other split from using available workers. The
 default remains the upstream-style Easy-then-Hard order.

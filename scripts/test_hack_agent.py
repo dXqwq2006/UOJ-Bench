@@ -5,7 +5,7 @@ import time
 from solution import load_solver
 from solution.api import FeedbackKind, HackingInput, SolverFeedback
 from utils.benchmark import solver_metadata
-from utils.uoj_api import SubmissionRequest, Client
+from utils.uoj_api import APIError, SubmissionRequest, Client
 
 def TestHackAgent(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
                   max_trials=10, metadata=None):
@@ -47,6 +47,8 @@ def TestHackAgent(solver, problem_id, problem_statement, submission_code, submis
             print(f"Trial {counted_trials + 1} failed with request error: {e}")
             time.sleep(20)
             continue
+        except APIError:
+            raise
         except Exception as e:
             print(f"Trial {counted_trials + 1} failed with unknown error: {e}")
             counted_trials += 1

@@ -4,7 +4,7 @@ import json
 from solution import load_solver
 from solution.api import FeedbackKind, RepairInput, SolverFeedback
 from utils.benchmark import solver_metadata
-from utils.uoj_api import SubmissionRequest, Client
+from utils.uoj_api import APIError, SubmissionRequest, Client
 from utils.patch import *
 
 import Levenshtein
@@ -61,6 +61,8 @@ def TestDebugAgent(solver, problem_id, problem_statement, submission_code, submi
         except json.JSONDecodeError as e:
             print(f"Trial {counted_trials + 1} failed with JSON parse error: {e}")
             continue
+        except APIError:
+            raise
         except ValueError as e:
             session.record_feedback(SolverFeedback(FeedbackKind.PATCH_ERROR, str(e)))
             counted_trials += 1

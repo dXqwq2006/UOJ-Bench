@@ -13,6 +13,7 @@ from solution.api import (
     SolutionCandidate,
     SolverTurn,
 )
+from utils.uoj_api import APIError
 
 
 class Session:
@@ -241,6 +242,40 @@ class AgentTaskTests(unittest.TestCase):
         self.assertEqual(score, 1)
         self.assertEqual(session.next_calls, 2)
         self.assertEqual(len(client.requests), 1)
+
+    def test_hacking_uoj_api_error_is_retryable_by_the_batch(self):
+        session = SequenceSession(HackCandidate("print(1)"))
+        solver = FakeSolver(None)
+        solver.start_hacking = lambda task: session
+        error = APIError(object())
+
+        with patch.object(test_hack_agent, "Client", return_value=FakeClient(error)):
+            with self.assertRaises(APIError):
+                test_hack_agent.TestHackAgent(
+                    solver, 1, "statement", "wrong", max_trials=1
+                )
+
+        self.assertEqual(session.next_calls, 1)
+        self.assertEqual(session.feedback, [])
+
+    def test_repair_uoj_api_error_is_retryable_by_the_batch(self):
+        session = SequenceSession(PatchCandidate("fixed"))
+        solver = FakeSolver(None)
+        solver.start_repair = lambda task: session
+        error = APIError(object())
+
+        with (
+            patch.object(test_debug_agent, "Client", return_value=FakeClient(error)),
+            patch.object(test_debug_agent, "apply_patch_to_code", return_value="fixed"),
+            patch.object(test_debug_agent, "similarity", return_value=0.95),
+        ):
+            with self.assertRaises(APIError):
+                test_debug_agent.TestDebugAgent(
+                    solver, 1, "statement", "wrong", max_trials=1
+                )
+
+        self.assertEqual(session.next_calls, 1)
+        self.assertEqual(session.feedback, [])
 
     def test_repair_preserves_outer_round_retry_after_uoj_transport_failure(self):
         session = SequenceSession(PatchCandidate("first"), PatchCandidate("second"))
