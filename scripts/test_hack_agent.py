@@ -7,26 +7,6 @@ from solution.api import FeedbackKind, HackingInput, SolverFeedback
 from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
 
-prompt = """
-You are an expert at breaking buggy code. You will be given a buggy code and the complete description of the problem it intends to solve. Your task is to find a valid input, respecting the input format and constraints, that causes the code to fail (e.g., produces a Wrong Answer or exceeds the time limit).
-
-Write a python program to print this failing test-case. Enclose your code within delimiters as follows.
-```python
-# YOUR CODE HERE
-```
-
-### Question:
-{problem}
-
-### Code:
-{code}
-
-### Answer: (use the provided format with backticks)
-
-"""
-
-try_again_prompt = "\nTry again! Output a new python code which would generate the correct hack data."
-
 def TestHackAgent(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
                   max_trials=10, metadata=None):
     # Initialize UOJ client
@@ -35,9 +15,8 @@ def TestHackAgent(solver, problem_id, problem_statement, submission_code, submis
     full_msgs=[]
     usages=[]
     counted_trials = 0
-    message = prompt.format(problem=problem_statement, code=submission_code)
-    task = HackingInput(problem_id, problem_statement, submission_code, message,
-                        submission_language, metadata or {})
+    task = HackingInput(problem_id, problem_statement, submission_code,
+                        submission_language=submission_language, metadata=metadata or {})
     session = solver.start_hacking(task)
     while counted_trials < max_trials:
         try:

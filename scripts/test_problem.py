@@ -7,46 +7,12 @@ from utils.uoj_api import SubmissionRequest, Client
 
 __all__ = 'TestProblemAgent'
 
-prompt = """
-You are an expert C++20 programmer. You will be given a question (problem specification) and will generate a correct C++20 program that matches the specification and gets as many points as possible you can.
-
-### Question:
-{problem}
-
-Read the inputs from stdin solve the problem and write the answer to stdout (do not directly test on the sample inputs). Enclose your code within delimiters as follows. Ensure that when the C++ program runs, it reads the inputs, runs the algorithm and writes output to STDOUT.
-```cpp
-# YOUR CODE HERE
-```
-
-### Answer: (use the provided format with backticks)
-
-
-"""
-
-prompt_chinese = """
-你是一位精通算法竞赛的专家。你将拿到一道题目的题面，你需要为这个题目输出一份正确的C++20代码，完成题目的要求。
-
-### 问题:
-{problem}
-
-你必须从 stdin 读入，从 stdout 输出，不要在样例输入上进行测试。按照如下格式输出你的代码。你需要确保你的程序直接从 stdin 读入输入数据，运行算法，并在 stdout 输出结果。
-```cpp
-# 你的代码
-```
-
-### 回答: (使用给定的带反引号的格式)
-
-
-"""
-
-
 def TestProblem(solver, problem_id, problem_statement, chinese=False, metadata=None):
     client = Client()
-    use_prompt = prompt_chinese if chinese else prompt
-    message = use_prompt.format(problem=problem_statement)
-
-    task = GenerationInput(problem_id, problem_statement, message, metadata=metadata or {})
-    turn = solver.start_generation(task).next()
+    task = GenerationInput(problem_id, problem_statement, chinese=chinese, metadata=metadata or {})
+    session = solver.start_generation(task)
+    message = session.initial_request
+    turn = session.next()
     full_msg, usage = turn.message, turn.usage
     if turn.candidate is None:
         return 0, message, turn.error, full_msg, usage

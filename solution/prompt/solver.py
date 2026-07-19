@@ -16,14 +16,11 @@ from solution.api import (
     SolverSession,
     SolverTurn,
 )
+from . import prompts
 
 
 CallDetails = Callable[[Any, str], Any]
 CandidateT = TypeVar("CandidateT")
-
-_HACK_RETRY = "\nTry again! Output a new python code which would generate the correct hack data."
-_REPAIR_RETRY = "\nTry again! Output a new patch which would be directly applied to the code given for the first time."
-
 
 def _default_call_details(message: Any, model: str) -> Any:
     from .call_llm import call_llm_details
@@ -39,13 +36,13 @@ class PromptSolver:
         self.call_details = call_details or _default_call_details
 
     def start_generation(self, task: GenerationInput) -> SolverSession[SolutionCandidate]:
-        return _PromptSession(self.model, self.call_details, task.official_prompt, "generation")
+        return _PromptSession(self.model, self.call_details, prompts.generation(task), "generation")
 
     def start_hacking(self, task: HackingInput) -> SolverSession[HackCandidate]:
-        return _PromptSession(self.model, self.call_details, task.official_prompt, "hacking")
+        return _PromptSession(self.model, self.call_details, prompts.hacking(task), "hacking")
 
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
-        return _PromptSession(self.model, self.call_details, task.official_prompt, "repair")
+        return _PromptSession(self.model, self.call_details, prompts.repair(task), "repair")
 
 
 class _PromptSession(Generic[CandidateT]):
@@ -91,6 +88,10 @@ class _PromptSession(Generic[CandidateT]):
         self.feedback_pending = True
 
     @property
+    def initial_request(self) -> str:
+        return self.prompt
+
+    @property
     def transcript(self) -> List[Dict[str, Any]]:
         return copy.deepcopy(self.history)
 
@@ -111,23 +112,23 @@ class _PromptSession(Generic[CandidateT]):
         kind = FeedbackKind(feedback.kind)
         if self.task == "hacking":
             if kind is FeedbackKind.INVALID_OUTPUT:
-                return "No Python code block found in your response" + _HACK_RETRY
+                return "No Python code block found in your response" + prompts.try_again_prompt_hacking
             if kind is FeedbackKind.JUDGE_REJECTED:
                 return (
                     "The python code generate invalid input or the code can still pass your test. "
-                    f"Here is the results\n{feedback.detail}\n\n" + _HACK_RETRY
+                    f"Here is the results\n{feedback.detail}\n\n" + prompts.try_again_prompt_hacking
                 )
             if kind is FeedbackKind.RUNTIME_ERROR:
-                return f"Meet error {feedback.detail}" + _HACK_RETRY
+                return f"Meet error {feedback.detail}" + prompts.try_again_prompt_hacking
         elif self.task == "repair":
             if kind is FeedbackKind.INVALID_OUTPUT:
-                return "No patch block found in your response" + _REPAIR_RETRY
+                return "No patch block found in your response" + prompts.try_again_prompt_repair
             if kind is FeedbackKind.PATCH_ERROR:
-                return f"Meet error when applying patch: {feedback.detail}" + _REPAIR_RETRY
+                return f"Meet error when applying patch: {feedback.detail}" + prompts.try_again_prompt_repair
             if kind is FeedbackKind.SIMILARITY_REJECTION:
-                return "You made too many changes" + _REPAIR_RETRY
+                return "You made too many changes" + prompts.try_again_prompt_repair
             if kind is FeedbackKind.JUDGE_REJECTED:
-                return f"The new code cannot pass all tests. Here is the results\n{feedback.detail}\n\n" + _REPAIR_RETRY
+                return f"The new code cannot pass all tests. Here is the results\n{feedback.detail}\n\n" + prompts.try_again_prompt_repair
             if kind is FeedbackKind.RUNTIME_ERROR:
-                return f"Meet error {feedback.detail}" + _REPAIR_RETRY
+                return f"Meet error {feedback.detail}" + prompts.try_again_prompt_repair
         raise ValueError(f"{kind.value} feedback is not valid for {self.task}")

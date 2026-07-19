@@ -16,8 +16,9 @@ from solution.api import (
 
 
 class Session:
-    def __init__(self, candidate):
+    def __init__(self, candidate, initial_request="solver request"):
         self.turn = SolverTurn(candidate, "raw", {"raw": True}, {"total_tokens": 3})
+        self.initial_request = initial_request
 
     def next(self, feedback=None):
         return self.turn
@@ -37,6 +38,10 @@ class SequenceSession:
         self.feedback = []
         self.next_calls = 0
         self.history = [{"role": "user", "content": "prompt"}]
+
+    @property
+    def initial_request(self):
+        return "solver request"
 
     def next(self, feedback=None):
         if feedback is not None:
@@ -114,7 +119,7 @@ class DirectTaskTests(unittest.TestCase):
         self.assertEqual(usage, {"total_tokens": 3})
         self.assertEqual(solver.task.metadata, {"title_en": "Title"})
         self.assertEqual(client.request.files["sub_answer_text"], (None, "int main() {}"))
-        self.assertIn("### Question:\nstatement", prompt)
+        self.assertEqual(prompt, "solver request")
 
     def test_hacking_uses_generator_candidate_and_official_binary_score(self):
         solver = FakeSolver(HackCandidate("print(1)"))

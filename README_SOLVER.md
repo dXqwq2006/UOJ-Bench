@@ -33,11 +33,11 @@ def build_solver(model: str) -> Solver:
     ...
 ```
 
-`solution/prompt/` owns the complete baseline implementation: `PromptSolver`,
-the official fence parser, retry-context rendering, and its TATU/OpenRouter
-adapter. It returns `SolutionCandidate`, `HackCandidate`, or `PatchCandidate`.
-New pipelines need no central registry entry; the CLI imports the directory by
-name and passes `--model` to its factory.
+`solution/prompt/` owns the complete baseline implementation: the original
+prompt text, `PromptSolver`, the official fence parser, retry-context rendering,
+and its TATU/OpenRouter adapter. Benchmark task inputs contain only raw problem
+data and public metadata. New pipelines need no central registry entry; the CLI
+imports the directory by name and passes `--model` to its factory.
 
 ```bash
 python -m scripts.test_hack_agent \

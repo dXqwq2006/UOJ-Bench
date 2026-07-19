@@ -29,6 +29,7 @@ ADDED = {
     "solution/api.py",
     "solution/prompt/__init__.py",
     "solution/prompt/call_llm.py",
+    "solution/prompt/prompts.py",
     "solution/prompt/solver.py",
     "tests/test_call_llm.py",
     "tests/test_solver.py",
@@ -54,7 +55,7 @@ def prompt_constants(source):
         target = node.targets[0]
         if (
             isinstance(target, ast.Name)
-            and (target.id.startswith("prompt") or target.id == "try_again_prompt")
+            and (target.id.startswith("prompt") or target.id.startswith("try_again_prompt"))
             and isinstance(node.value, ast.Constant)
             and isinstance(node.value.value, str)
         ):
@@ -71,12 +72,33 @@ class UpstreamBoundaryTests(unittest.TestCase):
                 self.assertEqual((ROOT / path).read_bytes(), upstream(path))
 
     def test_official_prompt_text_is_unchanged(self):
-        for path in TASK_SCRIPTS:
-            with self.subTest(path=path):
-                current = prompt_constants((ROOT / path).read_text(encoding="utf-8"))
-                original = prompt_constants(upstream(path).decode())
-                self.assertEqual(current, original)
-                self.assertTrue(current)
+        generation = prompt_constants(upstream("scripts/test_problem.py").decode())
+        hacking = prompt_constants(upstream("scripts/test_hack.py").decode())
+        repair = prompt_constants(upstream("scripts/test_debug.py").decode())
+        expected = {
+            "prompt_generation": generation["prompt"],
+            "prompt_generation_chinese": generation["prompt_chinese"],
+            "prompt_hacking": hacking["prompt"],
+            "prompt_hacking_chinese": hacking["prompt_chinese"],
+            "try_again_prompt_hacking": hacking["try_again_prompt"],
+            "prompt_repair": repair["prompt"],
+            "prompt_repair_chinese": repair["prompt_chinese"],
+            "try_again_prompt_repair": repair["try_again_prompt"],
+        }
+        current = prompt_constants(
+            (ROOT / "solution/prompt/prompts.py").read_text(encoding="utf-8")
+        )
+        self.assertEqual(current, expected)
+
+        for direct, agent in (
+            ("scripts/test_hack.py", "scripts/test_hack_agent.py"),
+            ("scripts/test_debug.py", "scripts/test_debug_agent.py"),
+        ):
+            with self.subTest(agent=agent):
+                direct_prompts = prompt_constants(upstream(direct).decode())
+                agent_prompts = prompt_constants(upstream(agent).decode())
+                self.assertEqual(agent_prompts["prompt"], direct_prompts["prompt"])
+                self.assertEqual(agent_prompts["try_again_prompt"], direct_prompts["try_again_prompt"])
 
     def test_task_runners_do_not_import_a_concrete_solver(self):
         for path in TASK_SCRIPTS:
@@ -91,6 +113,7 @@ class UpstreamBoundaryTests(unittest.TestCase):
                 self.assertNotIn("solution.prompt", modules)
                 self.assertNotIn("PromptSolver", source)
                 self.assertNotIn("call_llm", source)
+                self.assertFalse(prompt_constants(source))
 
     def test_diff_stays_inside_solver_boundary(self):
         changes = git("diff", "--no-renames", "--name-status", UPSTREAM).decode().splitlines()

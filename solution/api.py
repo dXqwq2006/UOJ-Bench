@@ -9,8 +9,8 @@ from typing import Any, Dict, Generic, List, Mapping, Optional, Protocol, TypeVa
 class GenerationInput:
     problem_id: int
     problem_statement: str
-    official_prompt: str
     language: str = "C++20"
+    chinese: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -19,8 +19,8 @@ class HackingInput:
     problem_id: int
     problem_statement: str
     submission_code: str
-    official_prompt: str
     submission_language: str = "C++20"
+    chinese: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -29,8 +29,8 @@ class RepairInput:
     problem_id: int
     problem_statement: str
     submission_code: str
-    official_prompt: str
     submission_language: str = "C++20"
+    chinese: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -76,6 +76,10 @@ class SolverTurn(Generic[CandidateT]):
 
 
 class SolverSession(Protocol, Generic[CandidateT]):
+    @property
+    def initial_request(self) -> Any:
+        ...
+
     @property
     def transcript(self) -> List[Dict[str, Any]]:
         ...

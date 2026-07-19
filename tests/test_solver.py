@@ -27,15 +27,15 @@ class FakeCaller:
 
 
 def generation_input():
-    return GenerationInput(1, "problem", "generation prompt")
+    return GenerationInput(1, "problem")
 
 
 def hacking_input():
-    return HackingInput(2, "problem", "wrong source", "hacking prompt")
+    return HackingInput(2, "problem", "wrong source")
 
 
 def repair_input():
-    return RepairInput(3, "problem", "wrong source", "repair prompt")
+    return RepairInput(3, "problem", "wrong source")
 
 
 class PromptSolverTests(unittest.TestCase):
@@ -55,7 +55,7 @@ class PromptSolverTests(unittest.TestCase):
                 self.assertEqual(turn.raw_text, text)
                 self.assertEqual(turn.message, {"content": text})
                 self.assertEqual(turn.usage, {"output_tokens": 7})
-                self.assertEqual(caller.calls, [(task.official_prompt, "model")])
+                self.assertEqual(caller.calls, [(session.initial_request, "model")])
 
     def test_parser_is_as_strict_as_upstream(self):
         invalid = [

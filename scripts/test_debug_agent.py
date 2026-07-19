@@ -7,39 +7,6 @@ from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
 from utils.patch import *
 
-prompt = """
-You are an expert at fixing bugs in code. You will be given a buggy code and the complete description of the problem it intends to solve. Your job is to modify the code to make it correct while making as few changes as possible. The change must be expressed as a patch file that can be directly applied to the code using the patch command. Do not add any comments or explanations in the patch. Make sure your patch is minimal, i.e., the number of lines of code added or deleted is as small as possible. Enclose your patch within delimiters as follows.
-
-```patch
-# YOUR PATCH HERE
-```
-
-Here is an example of a patch file. It consists of changes to somean example code. It specifies the line numbers of each change, and the removed and added lines.
-
-```patch
-@@ -6,6 +6,6 @@
-     int sum = 0;
-     
--    for (int i = 0; i <= 5; i++) {{
-+    for (int i = 0; i < 5; i++) {{
-         sum += arr[i];
-     }}
-```
-
-
-### Question:
-{problem}
-
-### Code:
-{code}
-
-### Answer: (use the provided format with backticks)
-
-
-"""
-
-try_again_prompt = "\nTry again! Output a new patch which would be directly applied to the code given for the first time."
-
 import Levenshtein
 
 def similarity(a: str, b: str) -> float:
@@ -56,9 +23,8 @@ def TestDebugAgent(solver, problem_id, problem_statement, submission_code, submi
     full_msgs=[]
     usages=[]
     counted_trials = 0
-    message = prompt.format(problem=problem_statement, code=submission_code)
-    task = RepairInput(problem_id, problem_statement, submission_code, message,
-                       submission_language, metadata or {})
+    task = RepairInput(problem_id, problem_statement, submission_code,
+                       submission_language=submission_language, metadata=metadata or {})
     session = solver.start_repair(task)
     while counted_trials < max_trials:
         try:
