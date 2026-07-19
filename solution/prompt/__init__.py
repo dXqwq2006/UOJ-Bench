@@ -1,6 +1,10 @@
-"""The upstream prompt and parser as a directory-based solver."""
+"""The upstream prompt baseline pipeline."""
 
-from utils.solver import PromptSolver, Solver
+from solution.api import Solver
+
+from .solver import PromptSolver
+
+__all__ = ["PromptSolver", "build_solver"]
 
 
 def build_solver(model: str) -> Solver:

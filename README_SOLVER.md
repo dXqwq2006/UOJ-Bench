@@ -8,7 +8,7 @@ turns a task into a candidate artifact.
 UOJ-Bench task -> Solver session -> typed candidate -> original UOJ evaluation
 ```
 
-`utils/solver.py` defines three entry points:
+`solution/api.py` defines three entry points:
 
 ```python
 solver.start_generation(task).next()
@@ -19,11 +19,9 @@ solver.start_repair(task).next(feedback)
 Agent runners record feedback as soon as it is produced, then request the next
 turn. Passing feedback directly to `next()` remains supported for custom use.
 
-The default `PromptSolver` sends the rendered upstream prompt to one model call
-and applies the exact upstream fence parser. It returns `SolutionCandidate`,
-`HackCandidate`, or `PatchCandidate`. A more complex pipeline can implement the
-same `Solver` protocol and return the same candidate types without emitting
-Markdown.
+Benchmark runners only construct task inputs, call these entry points, and
+evaluate typed candidates. They do not import a model client or a concrete
+solver.
 
 ## Pipeline directories
 
@@ -35,7 +33,9 @@ def build_solver(model: str) -> Solver:
     ...
 ```
 
-`solution/prompt/` is the directory-based form of the baseline `PromptSolver`.
+`solution/prompt/` owns the complete baseline implementation: `PromptSolver`,
+the official fence parser, retry-context rendering, and its TATU/OpenRouter
+adapter. It returns `SolutionCandidate`, `HackCandidate`, or `PatchCandidate`.
 New pipelines need no central registry entry; the CLI imports the directory by
 name and passes `--model` to its factory.
 
@@ -47,15 +47,15 @@ python -m scripts.test_hack_agent \
   --max_trials 5
 ```
 
-All five task CLIs accept `--solver`. Omitting it preserves the original
-model-string behavior.
+All five task CLIs accept `--solver` and default to `prompt`. A custom pipeline
+can use any model stack without adding model code to `utils/` or the runners.
 
 Direct tasks request one turn. The hacking and repair agent scripts keep their
 UOJ-owned trial loops and pass parser, local validation, and judge rejection
 feedback back to the session. Correct reference code and hidden error labels are
 never included in solver metadata.
 
-## Model configuration
+## Prompt baseline configuration
 
 The upstream `gpt-oss-120b` OpenRouter path remains available. These model names
 use TATU's native protocols:
@@ -85,5 +85,6 @@ UOJ_API_KEY=offline PYTHONDONTWRITEBYTECODE=1 \
 
 The boundary test compares the working tree with `ce1c006`: the dataset,
 official README, patch helper, UOJ client, and all prompt strings must remain
-unchanged. This branch intentionally does not include a batch runner or durable
-submission recovery.
+unchanged. Outside `solution/`, the fork contains only benchmark runners,
+benchmark utilities, tests, and documentation. This branch intentionally does
+not include a batch runner or durable submission recovery.

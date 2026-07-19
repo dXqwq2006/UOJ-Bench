@@ -2,7 +2,7 @@
 
 from importlib import import_module
 
-from utils.solver import Solver
+from .api import Solver
 
 
 def load_solver(name: str, model: str) -> Solver:

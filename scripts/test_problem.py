@@ -1,8 +1,9 @@
 import json
 
 from solution import load_solver
+from solution.api import GenerationInput
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
-from utils.solver import GenerationInput, resolve_solver, solver_metadata
 
 __all__ = 'TestProblemAgent'
 
@@ -39,13 +40,13 @@ prompt_chinese = """
 """
 
 
-def TestProblem(model, problem_id, problem_statement, chinese=False, metadata=None):
+def TestProblem(solver, problem_id, problem_statement, chinese=False, metadata=None):
     client = Client()
     use_prompt = prompt_chinese if chinese else prompt
     message = use_prompt.format(problem=problem_statement)
 
     task = GenerationInput(problem_id, problem_statement, message, metadata=metadata or {})
-    turn = resolve_solver(model).start_generation(task).next()
+    turn = solver.start_generation(task).next()
     full_msg, usage = turn.message, turn.usage
     if turn.candidate is None:
         return 0, message, turn.error, full_msg, usage
@@ -64,7 +65,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
-    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--problem_idx', type=int, default=0, help='The index of problem that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -76,7 +77,7 @@ if __name__ == '__main__':
     problem_id = problem['problem_id']
     problem_statement = problem['statement_en'] if not args.chinese else problem['statement_zh']
 
-    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    solver = load_solver(args.solver, args.model)
     score, message, result, full_msg, usage = TestProblem(solver, problem_id, problem_statement,
                                                           args.chinese, solver_metadata(problem))
 

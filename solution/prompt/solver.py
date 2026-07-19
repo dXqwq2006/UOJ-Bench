@@ -1,137 +1,38 @@
-"""Replaceable solvers for UOJ-Bench tasks."""
+"""The official prompt baseline solver."""
 
-from dataclasses import dataclass, field
-from enum import Enum
 import copy
 import re
-from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, Protocol, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, TypeVar
 
-
-__all__ = [
-    "FeedbackKind",
-    "GenerationInput",
-    "HackCandidate",
-    "HackingInput",
-    "PatchCandidate",
-    "PromptSolver",
-    "RepairInput",
-    "SolutionCandidate",
-    "Solver",
-    "SolverFeedback",
-    "SolverSession",
-    "SolverTurn",
-    "resolve_solver",
-    "solver_metadata",
-]
-
-
-@dataclass(frozen=True)
-class GenerationInput:
-    problem_id: int
-    problem_statement: str
-    official_prompt: str
-    language: str = "C++20"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class HackingInput:
-    problem_id: int
-    problem_statement: str
-    submission_code: str
-    official_prompt: str
-    submission_language: str = "C++20"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class RepairInput:
-    problem_id: int
-    problem_statement: str
-    submission_code: str
-    official_prompt: str
-    submission_language: str = "C++20"
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class SolutionCandidate:
-    source: str
-
-
-@dataclass(frozen=True)
-class HackCandidate:
-    generator: str
-
-
-@dataclass(frozen=True)
-class PatchCandidate:
-    patch: str
-
-
-class FeedbackKind(str, Enum):
-    INVALID_OUTPUT = "invalid_output"
-    PATCH_ERROR = "patch_error"
-    SIMILARITY_REJECTION = "similarity_rejection"
-    JUDGE_REJECTED = "judge_rejected"
-    RUNTIME_ERROR = "runtime_error"
-
-
-@dataclass(frozen=True)
-class SolverFeedback:
-    kind: FeedbackKind
-    detail: Any = None
-
-
-CandidateT = TypeVar("CandidateT")
-
-
-@dataclass(frozen=True)
-class SolverTurn(Generic[CandidateT]):
-    candidate: Optional[CandidateT]
-    raw_text: str
-    message: Any
-    usage: Mapping[str, Any]
-    error: Optional[str] = None
-
-
-class SolverSession(Protocol, Generic[CandidateT]):
-    @property
-    def transcript(self) -> List[Dict[str, Any]]:
-        ...
-
-    def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[CandidateT]:
-        ...
-
-    def record_feedback(self, feedback: SolverFeedback) -> None:
-        ...
-
-
-class Solver(Protocol):
-    def start_generation(self, task: GenerationInput) -> SolverSession[SolutionCandidate]:
-        ...
-
-    def start_hacking(self, task: HackingInput) -> SolverSession[HackCandidate]:
-        ...
-
-    def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
-        ...
+from solution.api import (
+    FeedbackKind,
+    GenerationInput,
+    HackCandidate,
+    HackingInput,
+    PatchCandidate,
+    RepairInput,
+    SolutionCandidate,
+    SolverFeedback,
+    SolverSession,
+    SolverTurn,
+)
 
 
 CallDetails = Callable[[Any, str], Any]
+CandidateT = TypeVar("CandidateT")
 
 _HACK_RETRY = "\nTry again! Output a new python code which would generate the correct hack data."
 _REPAIR_RETRY = "\nTry again! Output a new patch which would be directly applied to the code given for the first time."
 
 
 def _default_call_details(message: Any, model: str) -> Any:
-    from utils.call_llm import call_llm_details
+    from .call_llm import call_llm_details
 
     return call_llm_details(message, model)
 
 
 class PromptSolver:
-    """The official prompt and parser, exposed as a replaceable baseline solver."""
+    """Send the benchmark prompt to one model and apply its official parser."""
 
     def __init__(self, model: str, call_details: Optional[CallDetails] = None):
         self.model = model
@@ -145,31 +46,6 @@ class PromptSolver:
 
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
         return _PromptSession(self.model, self.call_details, task.official_prompt, "repair")
-
-
-def resolve_solver(value: Any) -> Solver:
-    return PromptSolver(value) if isinstance(value, str) else value
-
-
-def solver_metadata(record: Mapping[str, Any]) -> Mapping[str, Any]:
-    public_fields = {
-        "difficulty",
-        "difficulty-source",
-        "hack_id",
-        "hackable",
-        "language",
-        "problem_id",
-        "submission_id",
-        "title_en",
-        "title_zh",
-        "wrong_id",
-    }
-    scalar_types = (str, int, float, bool, type(None))
-    return {
-        key: value
-        for key, value in record.items()
-        if key in public_fields and isinstance(value, scalar_types)
-    }
 
 
 class _PromptSession(Generic[CandidateT]):
@@ -220,7 +96,7 @@ class _PromptSession(Generic[CandidateT]):
 
     def _append_assistant(self, raw_text: str, message: Any) -> None:
         if isinstance(message, Mapping) and message.get("native_turn"):
-            from utils.call_llm import assistant_history_message
+            from .call_llm import assistant_history_message
 
             self.history.append(assistant_history_message(raw_text, message))
             return

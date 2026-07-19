@@ -13,19 +13,28 @@ TASK_SCRIPTS = (
     "scripts/test_hack_agent.py",
     "scripts/test_debug_agent.py",
 )
-MODIFIED_UPSTREAM = {*TASK_SCRIPTS, "utils/call_llm.py"}
+MODIFIED_UPSTREAM = {*TASK_SCRIPTS}
+REMOVED_UPSTREAM = {
+    "utils/__pycache__/call_llm.cpython-311.pyc",
+    "utils/__pycache__/patch.cpython-311.pyc",
+    "utils/__pycache__/uoj_api.cpython-311.pyc",
+    "utils/call_llm.py",
+}
 ADDED = {
     ".github/workflows/tests.yml",
     ".gitignore",
     "README_SOLVER.md",
     "requirements.txt",
     "solution/__init__.py",
+    "solution/api.py",
     "solution/prompt/__init__.py",
+    "solution/prompt/call_llm.py",
+    "solution/prompt/solver.py",
     "tests/test_call_llm.py",
     "tests/test_solver.py",
     "tests/test_tasks.py",
     "tests/test_upstream_boundary.py",
-    "utils/solver.py",
+    "utils/benchmark.py",
 }
 
 
@@ -69,10 +78,28 @@ class UpstreamBoundaryTests(unittest.TestCase):
                 self.assertEqual(current, original)
                 self.assertTrue(current)
 
+    def test_task_runners_do_not_import_a_concrete_solver(self):
+        for path in TASK_SCRIPTS:
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                modules = {
+                    node.module
+                    for node in ast.walk(ast.parse(source))
+                    if isinstance(node, ast.ImportFrom) and node.module
+                }
+                self.assertIn("solution.api", modules)
+                self.assertNotIn("solution.prompt", modules)
+                self.assertNotIn("PromptSolver", source)
+                self.assertNotIn("call_llm", source)
+
     def test_diff_stays_inside_solver_boundary(self):
-        changes = git("diff", "--name-status", UPSTREAM).decode().splitlines()
+        changes = git("diff", "--no-renames", "--name-status", UPSTREAM).decode().splitlines()
         actual = {tuple(line.split("\t", 1)) for line in changes}
-        allowed = {*(('M', path) for path in MODIFIED_UPSTREAM), *(('A', path) for path in ADDED)}
+        allowed = {
+            *(('M', path) for path in MODIFIED_UPSTREAM),
+            *(('D', path) for path in REMOVED_UPSTREAM),
+            *(('A', path) for path in ADDED),
+        }
         self.assertEqual(actual, allowed)
 
 

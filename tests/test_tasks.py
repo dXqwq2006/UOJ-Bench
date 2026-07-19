@@ -6,7 +6,7 @@ from unittest.mock import patch
 os.environ.setdefault("UOJ_API_KEY", "offline")
 
 from scripts import test_debug, test_debug_agent, test_hack, test_hack_agent, test_problem
-from utils.solver import (
+from solution.api import (
     FeedbackKind,
     HackCandidate,
     PatchCandidate,

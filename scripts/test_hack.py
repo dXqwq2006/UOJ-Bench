@@ -1,8 +1,9 @@
 import json
 
 from solution import load_solver
+from solution.api import HackingInput
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
-from utils.solver import HackingInput, resolve_solver, solver_metadata
 
 prompt = """
 You are an expert at breaking buggy code. You will be given a buggy code and the complete description of the problem it intends to solve. Your task is to find a valid input, respecting the input format and constraints, that causes the code to fail (e.g., produces a Wrong Answer or exceeds the time limit).
@@ -43,7 +44,7 @@ prompt_chinese = """
 
 try_again_prompt = "\nTry again! Output a new python code which would generate the correct hack data."
 
-def TestHack(model, problem_id, problem_statement, submission_code, submission_language='C++20',
+def TestHack(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
              chinese=False, metadata=None):
     # Initialize UOJ client
     client = Client()
@@ -52,7 +53,7 @@ def TestHack(model, problem_id, problem_statement, submission_code, submission_l
 
     task = HackingInput(problem_id, problem_statement, submission_code, message,
                         submission_language, metadata or {})
-    turn = resolve_solver(model).start_hacking(task).next()
+    turn = solver.start_hacking(task).next()
     full_msg, usage = turn.message, turn.usage
     if turn.candidate is None:
         return 0, message, turn.error, full_msg, usage
@@ -77,7 +78,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/hacks.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
-    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--hack_idx', type=int, default=0, help='The index of hack that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -100,7 +101,7 @@ if __name__ == '__main__':
     submission_language = hack['language']
     problem_statement = problems_by_id[problem_id]
 
-    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    solver = load_solver(args.solver, args.model)
     score, message, result, full_msg, usage = TestHack(solver, problem_id, problem_statement,
                                                        submission_code, submission_language,
                                                        args.chinese, solver_metadata(hack))

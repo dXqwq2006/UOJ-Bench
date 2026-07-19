@@ -1,8 +1,9 @@
 import json
 from solution import load_solver
+from solution.api import RepairInput
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
 from utils.patch import *
-from utils.solver import RepairInput, resolve_solver, solver_metadata
 
 prompt = """
 You are an expert at fixing bugs in code. You will be given a buggy code and the complete description of the problem it intends to solve. Your job is to modify the code to make it correct while making as few changes as possible. The change must be expressed as a patch file that can be directly applied to the code using the patch command. Do not add any comments or explanations in the patch. Make sure your patch is minimal, i.e., the number of lines of code added or deleted is as small as possible. Enclose your patch within delimiters as follows.
@@ -75,7 +76,7 @@ def similarity(a: str, b: str) -> float:
     max_len = max(len(a), len(b))
     return 1 - dist / max_len
 
-def TestDebug(model, problem_id, problem_statement, submission_code, submission_language='C++20',
+def TestDebug(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
               chinese=False, metadata=None):
     submission_code = submission_code.replace('\r', '')
 
@@ -85,7 +86,7 @@ def TestDebug(model, problem_id, problem_statement, submission_code, submission_
 
     task = RepairInput(problem_id, problem_statement, submission_code, message,
                        submission_language, metadata or {})
-    turn = resolve_solver(model).start_repair(task).next()
+    turn = solver.start_repair(task).next()
     full_msg, usage = turn.message, turn.usage
     if turn.candidate is None:
         return 0, message, turn.error, full_msg, usage
@@ -111,7 +112,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/small_submission_pairs.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
-    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--debug_idx', type=int, default=0, help='The index of debugging task that will be tested.')
     parser.add_argument('--chinese', action='store_true', help='Use chinese input.')
     args = parser.parse_args()
@@ -132,7 +133,7 @@ if __name__ == '__main__':
     problem_statement = problems_by_id[problem_id]
     submission_language = similar_code['language']
 
-    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    solver = load_solver(args.solver, args.model)
     score, message, result, full_msg, usage = TestDebug(solver, problem_id, problem_statement,
                                                         submission_code, submission_language,
                                                         args.chinese, solver_metadata(similar_code))

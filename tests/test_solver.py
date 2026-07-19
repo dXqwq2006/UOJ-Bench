@@ -1,18 +1,18 @@
 import unittest
 
 from solution import load_solver
-from utils.solver import (
+from solution.api import (
     FeedbackKind,
     GenerationInput,
     HackCandidate,
     HackingInput,
     PatchCandidate,
-    PromptSolver,
     RepairInput,
     SolutionCandidate,
     SolverFeedback,
-    solver_metadata,
 )
+from solution.prompt import PromptSolver
+from utils.benchmark import solver_metadata
 
 
 class FakeCaller:

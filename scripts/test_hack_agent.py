@@ -3,14 +3,9 @@ import json
 import time
 
 from solution import load_solver
+from solution.api import FeedbackKind, HackingInput, SolverFeedback
+from utils.benchmark import solver_metadata
 from utils.uoj_api import SubmissionRequest, Client
-from utils.solver import (
-    FeedbackKind,
-    HackingInput,
-    SolverFeedback,
-    resolve_solver,
-    solver_metadata,
-)
 
 prompt = """
 You are an expert at breaking buggy code. You will be given a buggy code and the complete description of the problem it intends to solve. Your task is to find a valid input, respecting the input format and constraints, that causes the code to fail (e.g., produces a Wrong Answer or exceeds the time limit).
@@ -32,7 +27,7 @@ Write a python program to print this failing test-case. Enclose your code within
 
 try_again_prompt = "\nTry again! Output a new python code which would generate the correct hack data."
 
-def TestHackAgent(model, problem_id, problem_statement, submission_code, submission_language='C++20',
+def TestHackAgent(solver, problem_id, problem_statement, submission_code, submission_language='C++20',
                   max_trials=10, metadata=None):
     # Initialize UOJ client
     client = Client()
@@ -43,7 +38,7 @@ def TestHackAgent(model, problem_id, problem_statement, submission_code, submiss
     message = prompt.format(problem=problem_statement, code=submission_code)
     task = HackingInput(problem_id, problem_statement, submission_code, message,
                         submission_language, metadata or {})
-    session = resolve_solver(model).start_hacking(task)
+    session = solver.start_hacking(task)
     while counted_trials < max_trials:
         try:
             transcript = session.transcript
@@ -88,7 +83,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--file', type=str, default='dataset/hacks.json', help='dataset file')
     parser.add_argument('--model', type=str, default="gpt-oss-120b", help='Model to use')
-    parser.add_argument('--solver', metavar='NAME', help='Solver directory under solution/')
+    parser.add_argument('--solver', default='prompt', metavar='NAME', help='Solver directory under solution/')
     parser.add_argument('--hack_idx', type=int, default=0, help='The index of hack that will be tested.')
     parser.add_argument('--max_trials', type=int, default=5, help='Max agent rounds.')
     args = parser.parse_args()
@@ -111,7 +106,7 @@ if __name__ == '__main__':
     submission_language = hack['language']
     problem_statement = problems_by_id[problem_id]
 
-    solver = load_solver(args.solver, args.model) if args.solver else args.model
+    solver = load_solver(args.solver, args.model)
     score, message, results, full_msgs, usages = TestHackAgent(solver, problem_id, problem_statement,
                                                                submission_code, submission_language,
                                                                args.max_trials, solver_metadata(hack))
