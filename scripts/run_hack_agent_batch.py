@@ -395,16 +395,42 @@ def _pricing(model: str, input_price: float | None, output_price: float | None) 
     return DEFAULT_PRICING.get(model, (0.0, 0.0))
 
 
+def _pending_stages(
+    samples: list[HackSample], records: Mapping[str, Mapping[str, Any]], split_schedule: str,
+) -> list[list[HackSample]]:
+    pending = {
+        split: [
+            sample for sample in samples
+            if sample.split == split and records.get(sample.sample_id, {}).get("status") != "completed"
+        ]
+        for split in ("easy", "hard")
+    }
+    if split_schedule == "sequential":
+        return [pending[split] for split in ("easy", "hard") if pending[split]]
+    if split_schedule != "interleaved":
+        raise ValueError("split_schedule must be sequential or interleaved")
+
+    interleaved = []
+    for index in range(max((len(group) for group in pending.values()), default=0)):
+        for split in ("easy", "hard"):
+            if index < len(pending[split]):
+                interleaved.append(pending[split][index])
+    return [interleaved] if interleaved else []
+
+
 def run_batch(
     *, dataset_dir: str | Path, result_dir: str | Path, split: str, solver_name: str, model: str,
     max_trials: int = 10, workers: int = 8, resume: bool = False, smoke_per_split: int = 0,
     input_price: float | None = None, output_price: float | None = None,
-    budget_usd: float | None = None, stop_at_usd: float | None = None, progress: bool = True,
+    budget_usd: float | None = None, stop_at_usd: float | None = None,
+    split_schedule: str = "sequential", progress: bool = True,
 ) -> dict[str, Any]:
     if not 1 <= max_trials <= 10:
         raise ValueError("max_trials must be between 1 and 10")
     if workers < 1:
         raise ValueError("workers must be positive")
+    if split_schedule not in {"sequential", "interleaved"}:
+        raise ValueError("split_schedule must be sequential or interleaved")
     if budget_usd is not None and budget_usd <= 0:
         raise ValueError("budget_usd must be positive")
     if stop_at_usd is None:
@@ -489,12 +515,7 @@ def run_batch(
 
     budget_stopped = False
     with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="hack-agent") as executor:
-        # Preserve the paper's Easy-then-Hard order while allowing high concurrency within each split.
-        for split_name in ("easy", "hard"):
-            pending = [
-                sample for sample in samples
-                if sample.split == split_name and records.get(sample.sample_id, {}).get("status") != "completed"
-            ]
+        for pending in _pending_stages(samples, records, split_schedule):
             position = 0
             futures = {}
             while position < len(pending) or futures:
@@ -548,6 +569,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="gpt-oss-120b")
     parser.add_argument("--max-trials", type=_positive, default=10)
     parser.add_argument("--workers", type=_positive, default=8)
+    parser.add_argument(
+        "--split-schedule", choices=("sequential", "interleaved"), default="sequential",
+        help="run Easy then Hard, or keep both splits active concurrently",
+    )
     parser.add_argument("--dataset-dir", type=Path, default=Path("dataset"))
     parser.add_argument("--result-dir", type=Path, required=True)
     parser.add_argument("--resume", action="store_true")

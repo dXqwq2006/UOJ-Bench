@@ -166,6 +166,7 @@ class RunnerTests(unittest.TestCase):
                         "--model", "model-x",
                         "--max-trials", "7",
                         "--workers", "32",
+                        "--split-schedule", "interleaved",
                         "--dataset-dir", "data",
                         "--result-dir", "out",
                         "--resume",
@@ -184,6 +185,7 @@ class RunnerTests(unittest.TestCase):
             model="model-x",
             max_trials=7,
             workers=32,
+            split_schedule="interleaved",
             dataset_dir=Path("data"),
             result_dir=Path("out"),
             resume=True,
@@ -192,6 +194,24 @@ class RunnerTests(unittest.TestCase):
             output_price=4.0,
             budget_usd=100.0,
             stop_at_usd=90.0,
+        )
+
+    def test_interleaved_schedule_keeps_both_splits_active(self):
+        samples = [
+            sample("e1", "easy", "easy"),
+            sample("e2", "easy", "easy"),
+            sample("h1", "hard", "hard"),
+            sample("h2", "hard", "hard"),
+            sample("h3", "hard", "hard"),
+        ]
+
+        stages = batch._pending_stages(samples, {"e1": {"status": "completed"}}, "interleaved")
+
+        self.assertEqual([[item.sample_id for item in stage] for stage in stages], [["e2", "h1", "h2", "h3"]])
+        sequential = batch._pending_stages(samples, {}, "sequential")
+        self.assertEqual(
+            [[item.sample_id for item in stage] for stage in sequential],
+            [["e1", "e2"], ["h1", "h2", "h3"]],
         )
 
     def test_atomic_results_resume_and_fail_closed_metadata(self):

@@ -86,7 +86,8 @@ The batch runner uses the official Hacking Easy and Hard inputs. Easy is the
 
 ```bash
 python -m scripts.run_hack_agent_batch \
-  --split all --solver prompt --model gpt-oss-120b \
+  --split all --split-schedule interleaved \
+  --solver prompt --model gpt-oss-120b \
   --max-trials 10 --workers 24 \
   --result-dir /path/to/results
 ```
@@ -96,6 +97,10 @@ Each sample is written atomically with the complete transcript, model messages,
 usage, and UOJ results. Re-run with the same arguments and `--resume` to skip
 completed samples and retry interrupted ones. `summary.json` reports Pass@1
 through Pass@10 for each split and problem difficulty.
+
+Use `--split-schedule interleaved` for full runs so a slow tail in one official
+split does not prevent the other split from using available workers. The
+default remains the upstream-style Easy-then-Hard order.
 
 Paid runs accept `--budget-usd` and `--stop-at-usd`. The latter stops new work;
 already-running workers still finish, so leave a guard band based on smoke-run
