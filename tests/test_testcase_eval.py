@@ -7,11 +7,15 @@ from scripts import test_hack_agent
 from solution import load_solver
 from solution.api import (
     FeedbackKind,
+    FaultCoverageInput,
+    FaultExposureInput,
     GenerationInput,
     HackingInput,
     RepairInput,
     SolverCapabilities,
     SolverFeedback,
+    TestCaseCandidate,
+    TestCaseFormat,
     require_solver_support,
     solver_capabilities,
 )
@@ -56,6 +60,38 @@ class TestCaseEvalSolverTests(unittest.TestCase):
         self.assertEqual(turn.usage, {"output_tokens": 7})
         output = subprocess.check_output([sys.executable, "-c", turn.candidate.generator])
         self.assertEqual(output, b"2\n1 2")
+    def test_official_fault_coverage_and_exposure_return_raw_inputs(self):
+
+        coverage_caller = FakeCaller("```plaintext\n1\n7\n```")
+        coverage = TestCaseEvalSolver("model", coverage_caller).start_fault_coverage(
+            FaultCoverageInput("2000A", "Title: Problem\nDescription")
+        )
+        coverage_turn = coverage.next()
+
+        self.assertEqual(
+            coverage_turn.candidate,
+            TestCaseCandidate("1\n7", TestCaseFormat.RAW_INPUT),
+        )
+        self.assertNotIn("Buggy Code:", coverage.initial_request)
+        self.assertIn("Title: Problem", coverage.initial_request)
+
+        exposure_caller = FakeCaller("```plaintext\n2\n3 4\n```")
+        exposure = TestCaseEvalSolver("model", exposure_caller).start_fault_exposure(
+            FaultExposureInput(
+                "2000A",
+                "Title: Problem\nDescription",
+                42,
+                "int main() {}",
+                "C++20 (GCC 13-64)",
+            )
+        )
+        exposure_turn = exposure.next()
+
+        self.assertEqual(exposure_turn.candidate, TestCaseCandidate("2\n3 4"))
+        self.assertIn("Buggy Code:", exposure.initial_request)
+        self.assertIn("int main() {}", exposure.initial_request)
+        self.assertTrue(TestCaseEvalSolver.capabilities.fault_coverage)
+        self.assertTrue(TestCaseEvalSolver.capabilities.fault_exposure)
 
     def test_deterministic_official_regex_variants(self):
         cases = [

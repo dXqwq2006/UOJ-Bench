@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, Generic, List, Mapping, Optional, TypeVa
 
 from solution.api import (
     FeedbackKind,
+    FaultCoverageInput,
+    FaultExposureInput,
     GenerationInput,
     HackCandidate,
     HackingInput,
@@ -16,6 +18,8 @@ from solution.api import (
     SolverFeedback,
     SolverSession,
     SolverTurn,
+    TestCaseCandidate,
+    TestCaseFormat,
 )
 from . import prompts
 
@@ -32,7 +36,7 @@ def _default_call_details(message: Any, model: str) -> Any:
 class PromptSolver:
     """Send the benchmark prompt to one model and apply its official parser."""
 
-    capabilities = SolverCapabilities()
+    capabilities = SolverCapabilities(fault_exposure=True)
 
     def __init__(self, model: str, call_details: Optional[CallDetails] = None):
         self.model = model
@@ -47,12 +51,36 @@ class PromptSolver:
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
         return _PromptSession(self.model, self.call_details, prompts.repair(task), "repair")
 
+    def start_fault_coverage(
+        self, task: FaultCoverageInput
+    ) -> SolverSession[TestCaseCandidate]:
+        raise NotImplementedError("The UOJ prompt has no problem-level coverage task")
+
+    def start_fault_exposure(
+        self, task: FaultExposureInput
+    ) -> SolverSession[TestCaseCandidate]:
+        hacking = HackingInput(
+            problem_id=0,
+            problem_statement=task.problem_statement,
+            submission_code=task.submission_code,
+            submission_language=task.submission_language,
+            metadata=task.metadata,
+        )
+        return _PromptSession(
+            self.model, self.call_details, prompts.hacking(hacking), "fault_exposure"
+        )
+
 
 class _PromptSession(Generic[CandidateT]):
     _PARSERS = {
         "generation": (re.compile(r"```cpp\n(.*?)```", re.DOTALL), SolutionCandidate, "no output code"),
         "hacking": (re.compile(r"```python\n(.*?)```", re.DOTALL), HackCandidate, "no output hack data"),
         "repair": (re.compile(r"```patch\n(.*?)```", re.DOTALL), PatchCandidate, "no output patch"),
+        "fault_exposure": (
+            re.compile(r"```python\n(.*?)```", re.DOTALL),
+            lambda content: TestCaseCandidate(content, TestCaseFormat.PYTHON_GENERATOR),
+            "no output hack data",
+        ),
     }
 
     def __init__(self, model: str, call_details: CallDetails, prompt: str, task: str):

@@ -1,4 +1,4 @@
-"""TestCase-Eval Task 2 fault-exposure policy."""
+"""Official TestCase-Eval fault-coverage and fault-exposure policy."""
 
 import copy
 import re
@@ -6,6 +6,8 @@ from typing import Any, Callable, List, Mapping, Optional
 
 from solution.api import (
     FeedbackKind,
+    FaultCoverageInput,
+    FaultExposureInput,
     GenerationInput,
     HackCandidate,
     HackingInput,
@@ -16,6 +18,7 @@ from solution.api import (
     SolverFeedback,
     SolverSession,
     SolverTurn,
+    TestCaseCandidate,
 )
 from solution.llm.call_llm import assistant_history_message
 
@@ -60,12 +63,14 @@ def test_input_generator(test_input: str) -> str:
 
 
 class TestCaseEvalSolver:
-    """Generate one raw fault-exposing input with the Task 2 CoT prompt."""
+    """Generate raw test inputs with the official one-shot CoT prompts."""
 
     capabilities = SolverCapabilities(
         generation=False,
         hacking=True,
         repair=False,
+        fault_coverage=True,
+        fault_exposure=True,
         generation_feedback=False,
         hacking_feedback=False,
         repair_feedback=False,
@@ -79,21 +84,43 @@ class TestCaseEvalSolver:
         raise NotImplementedError("TestCase-Eval Task 2 does not support solution generation")
 
     def start_hacking(self, task: HackingInput) -> SolverSession[HackCandidate]:
-        return _Task2Session(self.model, self.call_details, prompts.hacking(task))
+        return _OneShotSession(
+            self.model,
+            self.call_details,
+            prompts.hacking(task),
+            lambda value: HackCandidate(test_input_generator(value)),
+        )
 
     def start_repair(self, task: RepairInput) -> SolverSession[PatchCandidate]:
         raise NotImplementedError("TestCase-Eval Task 2 does not support solution repair")
 
+    def start_fault_coverage(
+        self, task: FaultCoverageInput
+    ) -> SolverSession[TestCaseCandidate]:
+        return _OneShotSession(
+            self.model, self.call_details, prompts.fault_coverage(task), TestCaseCandidate
+        )
 
-class _Task2Session:
-    def __init__(self, model: str, call_details: CallDetails, prompt: str):
+    def start_fault_exposure(
+        self, task: FaultExposureInput
+    ) -> SolverSession[TestCaseCandidate]:
+        return _OneShotSession(
+            self.model, self.call_details, prompts.fault_exposure(task), TestCaseCandidate
+        )
+
+
+class _OneShotSession:
+    def __init__(
+        self, model: str, call_details: CallDetails, prompt: str, candidate_type
+    ):
         self.model = model
         self.call_details = call_details
         self.prompt = prompt
+        self.candidate_type = candidate_type
         self.history: List[dict[str, Any]] = [{"role": "user", "content": prompt}]
         self.started = False
 
-    def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[HackCandidate]:
+    def next(self, feedback: Optional[SolverFeedback] = None) -> SolverTurn[Any]:
         if feedback is not None:
             self.record_feedback(feedback)
         if self.started:
@@ -104,7 +131,7 @@ class _Task2Session:
         self._append_assistant(raw_text, message)
         test_input = extract_test_input(raw_text)
         return SolverTurn(
-            candidate=HackCandidate(test_input_generator(test_input)) if test_input else None,
+            candidate=self.candidate_type(test_input) if test_input else None,
             raw_text=raw_text,
             message=message,
             usage=usage,
