@@ -60,8 +60,8 @@ class TestCaseEvalSolverTests(unittest.TestCase):
         self.assertEqual(turn.usage, {"output_tokens": 7})
         output = subprocess.check_output([sys.executable, "-c", turn.candidate.generator])
         self.assertEqual(output, b"2\n1 2")
-    def test_official_fault_coverage_and_exposure_return_raw_inputs(self):
 
+    def test_official_fault_coverage_and_exposure_return_raw_inputs(self):
         coverage_caller = FakeCaller("```plaintext\n1\n7\n```")
         coverage = TestCaseEvalSolver("model", coverage_caller).start_fault_coverage(
             FaultCoverageInput("2000A", "Title: Problem\nDescription")
@@ -109,6 +109,31 @@ class TestCaseEvalSolverTests(unittest.TestCase):
         for response in ("1\n7", "```plaintext\n\n```", "no test"):
             with self.subTest(response=response):
                 self.assertIsNone(extract_test_input(response))
+
+    def test_malformed_response_uses_fixed_llm_extractor(self):
+        caller = FakeCaller("Test Input:\n1\n9")
+        extractor_calls = []
+
+        def extractor(response):
+            extractor_calls.append(response)
+            return (
+                "1\n9",
+                {"model": "gpt-4.1-mini"},
+                {"output_tokens": 3},
+            )
+
+        session = TestCaseEvalSolver("model", caller, extractor).start_fault_coverage(
+            FaultCoverageInput("2000A", "Problem")
+        )
+        turn = session.next()
+
+        self.assertEqual(extractor_calls, ["Test Input:\n1\n9"])
+        self.assertEqual(turn.candidate, TestCaseCandidate("1\n9"))
+        self.assertEqual(turn.message["generation"], {"content": "Test Input:\n1\n9"})
+        self.assertEqual(turn.message["extractor"], {"model": "gpt-4.1-mini"})
+        self.assertEqual(turn.usage["generation"], {"output_tokens": 7})
+        self.assertEqual(turn.usage["extractor"], {"output_tokens": 3})
+        self.assertIsNone(turn.error)
 
     def test_feedback_is_audited_but_never_consumed(self):
         caller = FakeCaller("```plaintext\n1\n```")

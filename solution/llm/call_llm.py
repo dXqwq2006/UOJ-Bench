@@ -84,13 +84,26 @@ def _env_float(name: str, default: float, minimum: float, maximum: float) -> flo
     return min(maximum, max(minimum, value))
 
 
-def _tatu_settings() -> tuple[str, str, int]:
+def _tatu_temperature() -> float | None:
+    raw = os.environ.get("TATU_TEMPERATURE", "").strip()
+    if not raw:
+        return None
+    try:
+        temperature = float(raw)
+    except ValueError as exc:
+        raise ValueError("TATU_TEMPERATURE must be a number") from exc
+    if not math.isfinite(temperature) or not 0 <= temperature <= 2:
+        raise ValueError("TATU_TEMPERATURE must be between 0 and 2")
+    return temperature
+
+
+def _tatu_settings() -> tuple[str, str, int, float | None]:
     key = os.environ.get("TATU_API_KEY", "").strip()
     if not key:
         raise RuntimeError("TATU_API_KEY is required")
     base = os.environ.get("TATU_BASE_URL", "https://maas.tatucloud.com/v1").rstrip("/")
     max_tokens = _env_int("TATU_MAX_OUTPUT_TOKENS", 65536, 1, 65536)
-    return key, base, max_tokens
+    return key, base, max_tokens, _tatu_temperature()
 
 
 def _post(url: str, headers: dict[str, str], payload: dict[str, Any], secret: str) -> dict[str, Any]:
@@ -311,7 +324,7 @@ def _result(
     }
 
 
-def _call_openai(history, model, key, base, max_tokens):
+def _call_openai(history, model, key, base, max_tokens, temperature):
     token_parameter = "max_completion_tokens" if model == "gpt-5.6-sol" else "max_tokens"
     payload = {
         "model": model,
@@ -319,6 +332,8 @@ def _call_openai(history, model, key, base, max_tokens):
         token_parameter: max_tokens,
         "stream": False,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     requested_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
     reasoning_effort = "xhigh" if model == "gpt-5.6-sol" and requested_effort == "max" else requested_effort
     if reasoning_effort:
@@ -351,11 +366,12 @@ def _call_openai(history, model, key, base, max_tokens):
             "max_tokens_parameter": token_parameter,
             "reasoning_effort": reasoning_effort or None,
             "reasoning_effort_requested": requested_effort or None,
+            "temperature": temperature,
         },
     )
 
 
-def _call_openai_responses(history, model, key, base, max_tokens):
+def _call_openai_responses(history, model, key, base, max_tokens, temperature):
     deployer = os.environ.get("TATU_DEPLOYER", "").strip()
     request_model = model if not deployer or "@" in model else f"{model}@{deployer}"
     requested_effort = os.environ.get("TATU_REASONING_EFFORT", "").strip()
@@ -370,6 +386,8 @@ def _call_openai_responses(history, model, key, base, max_tokens):
         "store": False,
         "max_output_tokens": max_tokens,
     }
+    if temperature is not None:
+        payload["temperature"] = temperature
     if reasoning_effort:
         payload["reasoning"] = {"effort": reasoning_effort}
     raw = _post(
@@ -403,6 +421,7 @@ def _call_openai_responses(history, model, key, base, max_tokens):
             "max_output_tokens": max_tokens,
             "reasoning_effort": reasoning_effort or None,
             "reasoning_effort_requested": requested_effort or None,
+            "temperature": temperature,
             "store": False,
         },
     )
@@ -438,9 +457,11 @@ def _call_gpt_oss_local(message: Any, base: str) -> dict[str, Any]:
     return raw
 
 
-def _call_anthropic(history, model, key, base, max_tokens):
+def _call_anthropic(history, model, key, base, max_tokens, temperature):
     messages, system = _anthropic_messages(history)
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": False}
+    if temperature is not None:
+        payload["temperature"] = temperature
     if system:
         payload["system"] = system
     raw = _post(
@@ -475,13 +496,16 @@ def _call_anthropic(history, model, key, base, max_tokens):
         {"role": "assistant", "content": copy.deepcopy(blocks)},
         raw.get("stop_reason"),
         raw.get("usage"),
-        {"max_output_tokens": max_tokens},
+        {"max_output_tokens": max_tokens, "temperature": temperature},
     )
 
 
-def _call_gemini(history, model, key, base, max_tokens):
+def _call_gemini(history, model, key, base, max_tokens, temperature):
     messages, system = _gemini_messages(history)
-    payload = {"contents": messages, "generationConfig": {"maxOutputTokens": max_tokens}}
+    generation_config = {"maxOutputTokens": max_tokens}
+    if temperature is not None:
+        generation_config["temperature"] = temperature
+    payload = {"contents": messages, "generationConfig": generation_config}
     if system:
         payload["systemInstruction"] = {"parts": system}
     origin = base.rstrip("/")
@@ -521,7 +545,7 @@ def _call_gemini(history, model, key, base, max_tokens):
         {"role": "model", "parts": copy.deepcopy(parts)},
         candidate.get("finishReason"),
         raw.get("usageMetadata"),
-        {"max_output_tokens": max_tokens},
+        {"max_output_tokens": max_tokens, "temperature": temperature},
     )
 
 
@@ -535,18 +559,20 @@ def call_llm_full(message, m):
         provider = TATU_MODELS[m]
     except KeyError as exc:
         raise ValueError(f"unsupported model: {m}") from exc
-    key, base, max_tokens = _tatu_settings()
+    key, base, max_tokens, temperature = _tatu_settings()
     history = generate_messages(message)
     if provider == "openai":
         transport = os.environ.get("TATU_OPENAI_TRANSPORT", "chat-completions").strip()
         if transport == "responses":
-            return _call_openai_responses(history, m, key, base, max_tokens)
+            return _call_openai_responses(
+                history, m, key, base, max_tokens, temperature
+            )
         if transport != "chat-completions":
             raise ValueError(f"unsupported TATU OpenAI transport: {transport}")
-        return _call_openai(history, m, key, base, max_tokens)
+        return _call_openai(history, m, key, base, max_tokens, temperature)
     if provider == "anthropic":
-        return _call_anthropic(history, m, key, base, max_tokens)
-    return _call_gemini(history, m, key, base, max_tokens)
+        return _call_anthropic(history, m, key, base, max_tokens, temperature)
+    return _call_gemini(history, m, key, base, max_tokens, temperature)
 
 
 def call_llm(message, m):

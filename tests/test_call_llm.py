@@ -220,6 +220,7 @@ class CallLlmTests(unittest.TestCase):
                 "max_tokens_parameter": "max_tokens",
                 "reasoning_effort": None,
                 "reasoning_effort_requested": None,
+                "temperature": None,
             },
         )
         self.assertNotIn("tatu-secret", repr(result))
@@ -251,6 +252,7 @@ class CallLlmTests(unittest.TestCase):
                 "max_tokens_parameter": "max_completion_tokens",
                 "reasoning_effort": "xhigh",
                 "reasoning_effort_requested": "max",
+                "temperature": None,
             },
         )
 
@@ -320,6 +322,7 @@ class CallLlmTests(unittest.TestCase):
                 "TATU_DEPLOYER": "CODING_TATU",
                 "TATU_REASONING_EFFORT": "xhigh",
                 "TATU_TIMEOUT_SECONDS": "1200",
+                "TATU_TEMPERATURE": "1.0",
             },
             clear=False,
         ), patch("solution.llm.call_llm.requests.Session", return_value=context):
@@ -341,6 +344,7 @@ class CallLlmTests(unittest.TestCase):
                 ],
                 "store": False,
                 "max_output_tokens": 65536,
+                "temperature": 1.0,
                 "reasoning": {"effort": "xhigh"},
             },
             timeout=1200,
@@ -369,6 +373,7 @@ class CallLlmTests(unittest.TestCase):
                 "max_output_tokens": 65536,
                 "reasoning_effort": "xhigh",
                 "reasoning_effort_requested": "xhigh",
+                "temperature": 1.0,
                 "store": False,
             },
         )
