@@ -43,7 +43,7 @@ class CallLlmTests(unittest.TestCase):
             "usage": {"total_tokens": 3},
             "echo": "key-openrouter",
         }
-        with patch.dict(os.environ, {"OPENROUTER_KEY": "key-openrouter"}), patch(
+        with patch.dict(os.environ, {"OPENROUTER_KEY": "key-openrouter"}, clear=True), patch(
             "solution.prompt.call_llm.requests.post", return_value=Response(raw)
         ) as post:
             result = call_llm.call_llm_full("question", "gpt-oss-120b")
@@ -61,6 +61,76 @@ class CallLlmTests(unittest.TestCase):
         )
         self.assertEqual(result["choices"][0]["message"]["content"], "answer")
         self.assertEqual(result["echo"], "<redacted>")
+
+    def test_gpt_oss_local_payload_and_synthetic_history(self):
+        raw = {
+            "model": "gpt-oss-120b",
+            "choices": [
+                {
+                    "message": {
+                        "content": "answer",
+                        "reasoning_content": "thought",
+                        "native_turn": {"must": "not survive"},
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 5, "total_tokens": 12},
+            "debug": "local-secret",
+        }
+        context, session = self.tatu_session(raw)
+        history = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "[REASONING]old thought"},
+            {"role": "assistant", "content": "[ANSWER]old answer"},
+            {"role": "user", "content": "again"},
+        ]
+        with patch.dict(
+            os.environ,
+            {
+                "GPT_OSS_BASE_URL": "http://127.0.0.1:8000/v1/",
+                "GPT_OSS_API_KEY": "local-secret",
+                "GPT_OSS_MAX_OUTPUT_TOKENS": "12345",
+            },
+            clear=True,
+        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+            result = call_llm.call_llm_full(history, "gpt-oss-120b")
+
+        session.post.assert_called_once_with(
+            "http://127.0.0.1:8000/v1/chat/completions",
+            headers={
+                "Authorization": "Bearer local-secret",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "gpt-oss-120b",
+                "messages": history,
+                "max_tokens": 12345,
+                "stream": False,
+            },
+            timeout=900,
+        )
+        message = result["choices"][0]["message"]
+        self.assertEqual(message["content"], "answer")
+        self.assertEqual(message["reasoning_content"], "thought")
+        self.assertNotIn("native_turn", message)
+        self.assertNotIn("reasoning_effort", session.post.call_args.kwargs["json"])
+        self.assertNotIn("local-secret", repr(result))
+
+    def test_gpt_oss_local_defaults_do_not_redact_normal_content(self):
+        raw = {"choices": [{"message": {"content": "use a local variable"}}]}
+        context, session = self.tatu_session(raw)
+        with patch.dict(
+            os.environ,
+            {"GPT_OSS_BASE_URL": "http://127.0.0.1:8000/v1"},
+            clear=True,
+        ), patch("solution.prompt.call_llm.requests.Session", return_value=context):
+            result = call_llm.call_llm_full("question", "gpt-oss-120b")
+
+        request = session.post.call_args.kwargs
+        self.assertEqual(request["headers"]["Authorization"], "Bearer local")
+        self.assertEqual(request["json"]["max_tokens"], 65536)
+        self.assertEqual(result["choices"][0]["message"]["content"], "use a local variable")
 
     def test_openai_tatu_payload_normalization_and_limits(self):
         raw = {

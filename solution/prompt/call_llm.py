@@ -275,6 +275,34 @@ def _call_openai(history, model, key, base, max_tokens):
     )
 
 
+def _call_gpt_oss_local(message: Any, base: str) -> dict[str, Any]:
+    secret = os.environ.get("GPT_OSS_API_KEY", "").strip()
+    key = secret or "local"
+    max_tokens = _env_int("GPT_OSS_MAX_OUTPUT_TOKENS", 65536, 1, 65536)
+    raw = _post(
+        f"{base.rstrip('/')}/chat/completions",
+        {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        {
+            "model": "gpt-oss-120b",
+            "messages": generate_messages(message),
+            "max_tokens": max_tokens,
+            "stream": False,
+        },
+        secret,
+    )
+    try:
+        assistant = raw["choices"][0]["message"]
+        if not isinstance(assistant, dict):
+            raise TypeError
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("Local GPT-OSS response has no assistant message") from exc
+    assistant.setdefault("role", "assistant")
+    assistant["content"] = _text(assistant.get("content"))
+    assistant["reasoning_content"] = _text(assistant.get("reasoning_content"))
+    assistant.pop("native_turn", None)
+    return raw
+
+
 def _call_anthropic(history, model, key, base, max_tokens):
     messages, system = _anthropic_messages(history)
     payload = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": False}
@@ -364,6 +392,9 @@ def _call_gemini(history, model, key, base, max_tokens):
 
 def call_llm_full(message, m):
     if m == "gpt-oss-120b":
+        base = os.environ.get("GPT_OSS_BASE_URL", "").strip()
+        if base:
+            return _call_gpt_oss_local(message, base)
         return call_openrouter(message, "openai/" + m)
     try:
         provider = TATU_MODELS[m]

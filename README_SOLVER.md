@@ -74,6 +74,33 @@ TATU generation POSTs are not retried inside the call adapter. This keeps one
 recorded model turn equal to one potentially billable request. The Agent runners
 retain upstream's outer-round exception and trial behavior.
 
+Set `GPT_OSS_BASE_URL` to route `gpt-oss-120b` to a local OpenAI-compatible
+server instead of OpenRouter. `GPT_OSS_API_KEY` is optional and defaults to
+`local`; `GPT_OSS_MAX_OUTPUT_TOKENS` defaults to 65536.
+
+## Hacking batches
+
+The batch runner uses the official Hacking Easy and Hard inputs. Easy is the
+479 hackable entries from `sampled_large_submission_pairs.json`; Hard is all
+1046 entries from `hacks.json`.
+
+```bash
+python -m scripts.run_hack_agent_batch \
+  --split all --solver prompt --model gpt-oss-120b \
+  --max-trials 10 --workers 24 \
+  --result-dir /path/to/results
+```
+
+Add `--smoke-per-split 5` for the deterministic 5 Easy + 5 Hard smoke set.
+Each sample is written atomically with the complete transcript, model messages,
+usage, and UOJ results. Re-run with the same arguments and `--resume` to skip
+completed samples and retry interrupted ones. `summary.json` reports Pass@1
+through Pass@10 for each split and problem difficulty.
+
+Paid runs accept `--budget-usd` and `--stop-at-usd`. The latter stops new work;
+already-running workers still finish, so leave a guard band based on smoke-run
+costs and worker count.
+
 ## Offline verification
 
 ```bash
@@ -85,6 +112,7 @@ UOJ_API_KEY=offline PYTHONDONTWRITEBYTECODE=1 \
 
 The boundary test compares the working tree with `ce1c006`: the dataset,
 official README, patch helper, UOJ client, and all prompt strings must remain
-unchanged. Outside `solution/`, the fork contains only benchmark runners,
-benchmark utilities, tests, and documentation. This branch intentionally does
-not include a batch runner or durable submission recovery.
+unchanged. Differential tests execute the five upstream runners with fixed LLM
+and UOJ tapes and require identical prompts, parsing, feedback histories,
+submissions, and scores. Outside `solution/`, the fork contains only benchmark
+runners, benchmark utilities, tests, and documentation.
