@@ -298,7 +298,9 @@ def _call_gpt_oss_local(message: Any, base: str) -> dict[str, Any]:
         raise RuntimeError("Local GPT-OSS response has no assistant message") from exc
     assistant.setdefault("role", "assistant")
     assistant["content"] = _text(assistant.get("content"))
-    assistant["reasoning_content"] = _text(assistant.get("reasoning_content"))
+    assistant["reasoning_content"] = _text(
+        assistant.get("reasoning_content", assistant.get("reasoning"))
+    )
     assistant.pop("native_turn", None)
     return raw
 

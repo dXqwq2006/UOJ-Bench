@@ -69,7 +69,7 @@ class CallLlmTests(unittest.TestCase):
                 {
                     "message": {
                         "content": "answer",
-                        "reasoning_content": "thought",
+                        "reasoning": "thought",
                         "native_turn": {"must": "not survive"},
                     },
                     "finish_reason": "stop",
