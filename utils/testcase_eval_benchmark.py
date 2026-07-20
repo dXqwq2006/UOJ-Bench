@@ -41,6 +41,10 @@ DATASETS = {
         "Raywithyou/TestCase-Eval-Task1",
         "bd8b0e2e26e1e52225ca41537eaff592142cbc85",
     ),
+    "task1_direct_prompt": (
+        "Raywithyou/TestCase-Eval-Task1-DO",
+        "294e91a4b1cbc3a93428e663afc112a017e1d5c2",
+    ),
     "task2_prompt": (
         "Raywithyou/TestCase-Eval-Task2",
         "ad6c3af216b088652b6f05d7df331b3858bf916d",
@@ -385,7 +389,7 @@ def prepare_dataset(
         )
     store.connection.commit()
 
-    prompt_checks = {1: 0, 2: 0}
+    prompt_checks: dict[int | str, int] = {1: 0, 2: 0, "direct": 0}
     if verify_prompts:
         prompt_checks = _verify_official_prompts(
             problems, lite_rows, selected_set, cache_dir
@@ -400,6 +404,7 @@ def prepare_dataset(
         "right_all": sum(row.get("type") == "right_submission" for row in all_rows),
         "right_lite": sum(row.get("type") == "right_submission" for row in lite_rows),
         "verified_task1_prompts": prompt_checks[1],
+        "verified_task1_direct_prompts": prompt_checks["direct"],
         "verified_task2_prompts": prompt_checks[2],
         "problem_ids": selected,
     }
@@ -412,12 +417,18 @@ def _verify_official_prompts(
     lite_rows: Sequence[Mapping[str, Any]],
     selected: set[str],
     cache_dir: str | None,
-) -> dict[int, int]:
+) -> dict[int | str, int]:
     from solution.testcase_eval import prompts
+    from solution.testcase_eval_task1_direct import prompts as direct_prompts
 
     expected_task1 = {
         _problem_id(row): _prompt_text(row["prompt"])
         for row in _load_dataset("task1_prompt", cache_dir)
+        if _problem_id(row) in selected
+    }
+    expected_task1_direct = {
+        _problem_id(row): _prompt_text(row["prompt"])
+        for row in _load_dataset("task1_direct_prompt", cache_dir)
         if _problem_id(row) in selected
     }
     lite_by_id = {_submission_id(row): row for row in lite_rows}
@@ -437,6 +448,16 @@ def _verify_official_prompts(
         )
         if expected_task1.get(problem_id) != actual:
             raise ValueError(f"Task 1 prompt differs from pinned dataset for {problem_id}")
+        direct = direct_prompts.fault_coverage(
+            FaultCoverageInput(
+                problem_id,
+                _problem_statement(problems[problem_id]),
+            )
+        )
+        if expected_task1_direct.get(problem_id) != direct:
+            raise ValueError(
+                f"Task 1 direct prompt differs from pinned dataset for {problem_id}"
+            )
         checked1 += 1
 
     checked2 = 0
@@ -460,7 +481,7 @@ def _verify_official_prompts(
                 f"{problem_id}/{submission_id}"
             )
         checked2 += 1
-    return {1: checked1, 2: checked2}
+    return {1: checked1, 2: checked2, "direct": checked1}
 
 
 def _existing_generation(
@@ -970,6 +991,11 @@ def _expected_counts(store: RunStore) -> dict[str, int]:
     task1_generations = int(
         manifest.get("task1_generations", PAPER_GENERATIONS[1])
     )
+    model = str(manifest.get("model", ""))
+    capabilities = {
+        policy: solver_capabilities(load_solver(policy, model))
+        for policy in policies
+    }
     problem_count = store.connection.execute(
         "SELECT COUNT(*) FROM problems"
     ).fetchone()[0]
@@ -1010,11 +1036,15 @@ def _expected_counts(store: RunStore) -> dict[str, int]:
 
     generations = 0
     executions = 0
-    if 1 in tasks and "testcase_eval" in policies:
-        generations += problem_count * task1_generations
-        executions += all_count * task1_generations
+    if 1 in tasks:
+        for policy in policies:
+            if capabilities[policy].fault_coverage:
+                generations += problem_count * task1_generations
+                executions += all_count * task1_generations
     if 2 in tasks:
-        for _policy in policies:
+        for policy in policies:
+            if not capabilities[policy].fault_exposure:
+                continue
             generations += wrong_lite
             executions += sum(
                 wrong_count * (1 + rights_lite_by_problem.get(problem_id, 0))

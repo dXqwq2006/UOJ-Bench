@@ -24,7 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGE = "uoj-bench-testcase-eval:45275c6"
 
 
-def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
+def _arguments(
+    default_tasks: Sequence[int] | None,
+    default_policies: Sequence[str] | None,
+) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--phase",
@@ -68,7 +71,9 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
     parser.add_argument("--judge-identity", help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.tasks = sorted(set(args.task or default_tasks or (1, 2)))
-    args.policies = sorted(set(args.policies or ("testcase_eval",)))
+    args.policies = sorted(
+        set(args.policies or default_policies or ("testcase_eval",))
+    )
     return args
 
 
@@ -76,7 +81,11 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def _preflight(model: str, paper: bool) -> dict[str, object]:
+def _preflight(
+    model: str,
+    paper: bool,
+    policies: Sequence[str] = ("testcase_eval",),
+) -> dict[str, object]:
     if paper:
         require_paper_generation_settings(model)
     from solution.llm.call_llm import call_llm_details
@@ -120,31 +129,33 @@ def _preflight(model: str, paper: bool) -> dict[str, object]:
         }
         if mismatches:
             raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
-    try:
-        extracted, extractor_message, extractor_usage = extract_test_input_llm(
-            "Test Input:\n1"
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            "fixed gpt-4.1-mini extractor preflight failed; "
-            "the strict benchmark is blocked"
-        ) from exc
-    if extracted.strip() != "1":
-        raise RuntimeError(f"extractor preflight returned {extracted!r}")
-    return {
+    result = {
         "main": {
             "model": message.get("model"),
             "request_config": request_config,
             "usage": usage,
             "returned_text": bool(raw_text),
         },
-        "extractor": {
+    }
+    if "testcase_eval" in policies:
+        try:
+            extracted, extractor_message, extractor_usage = extract_test_input_llm(
+                "Test Input:\n1"
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "fixed gpt-4.1-mini extractor preflight failed; "
+                "the strict benchmark is blocked"
+            ) from exc
+        if extracted.strip() != "1":
+            raise RuntimeError(f"extractor preflight returned {extracted!r}")
+        result["extractor"] = {
             "model": extractor_message.get("model"),
             "request_config": extractor_message.get("request_config"),
             "usage": extractor_usage,
             "extracted": extracted,
-        },
-    }
+        }
+    return result
 
 
 def _run_docker(args: argparse.Namespace) -> None:
@@ -213,14 +224,17 @@ def _run_docker(args: argparse.Namespace) -> None:
     subprocess.run(command, check=True)
 
 
-def main(default_tasks: Sequence[int] | None = None) -> None:
-    args = _arguments(default_tasks)
+def main(
+    default_tasks: Sequence[int] | None = None,
+    default_policies: Sequence[str] | None = None,
+) -> None:
+    args = _arguments(default_tasks, default_policies)
     args.result_dir = args.result_dir.resolve()
     args.result_dir.mkdir(parents=True, exist_ok=True)
     database = args.result_dir / "results.sqlite3"
 
     if args.phase == "preflight":
-        _print(_preflight(args.model, args.paper))
+        _print(_preflight(args.model, args.paper, args.policies))
         return
     if args.phase == "judge":
         if args.judge_backend == "lightcp":

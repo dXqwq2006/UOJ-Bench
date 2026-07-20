@@ -4,4 +4,10 @@ from scripts.run_testcase_eval_batch import main
 
 
 if __name__ == "__main__":
-    main(default_tasks=(1,))
+    main(
+        default_tasks=(1,),
+        default_policies=(
+            "testcase_eval_task1_cot",
+            "testcase_eval_task1_direct",
+        ),
+    )

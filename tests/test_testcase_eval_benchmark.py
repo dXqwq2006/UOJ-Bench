@@ -238,6 +238,25 @@ class PreflightTests(unittest.TestCase):
                     "gemini-3.1-pro-preview", paper=True
                 )
 
+    def test_strict_task1_policies_skip_extractor_preflight(self):
+        with patch(
+            "solution.llm.call_llm.call_llm_details",
+            return_value=("```plaintext\n1\n```", {"request_config": {}}, {}),
+        ), patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            side_effect=AssertionError("extractor must not run"),
+        ):
+            result = run_testcase_eval_batch._preflight(
+                "model",
+                paper=False,
+                policies=(
+                    "testcase_eval_task1_cot",
+                    "testcase_eval_task1_direct",
+                ),
+            )
+
+        self.assertNotIn("extractor", result)
+
 
 class ExecutorTests(unittest.TestCase):
     def test_process_limit_and_java_class_rewrite(self):
