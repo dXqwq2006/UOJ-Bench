@@ -13,6 +13,7 @@ import time
 import urllib.error
 import urllib.request
 
+from utils.testcase_eval_benchmark import encode_execution_output
 from utils.testcase_eval_executor import (
     LANGUAGES,
     OUTPUT_LIMIT_BYTES,
@@ -229,7 +230,7 @@ def _execute_one(
         row["checked_submission_language"],
         row["checked_submission_difficulty"],
         result["result"],
-        result["output"],
+        encode_execution_output(result["output"]),
         result["error"],
         result["elapsed"],
         result["memory_kb"],

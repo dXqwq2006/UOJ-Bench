@@ -17,6 +17,8 @@ import tempfile
 import threading
 import time
 
+from utils.testcase_eval_benchmark import encode_execution_output
+
 
 TIME_LIMIT_SECONDS = 3.0
 MEMORY_LIMIT_MB = 512
@@ -593,7 +595,7 @@ def _execute_one(
         row["checked_submission_language"],
         row["checked_submission_difficulty"],
         result["result"],
-        result["output"],
+        encode_execution_output(result["output"]),
         result["error"],
         result["elapsed"],
         result["memory_kb"],

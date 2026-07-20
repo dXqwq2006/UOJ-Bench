@@ -13,6 +13,7 @@ import os
 import sqlite3
 import tempfile
 import time
+import zlib
 
 from solution import load_solver
 from solution.api import (
@@ -51,6 +52,32 @@ PAPER_TEMPERATURE = 1.0
 PAPER_REASONING_MAX_OUTPUT_TOKENS = 18_000
 _KILL_RESULTS = {"runtime_error", "time_limit_exceeded", "memory_limit_exceeded"}
 _BOOL_TOKENS = {"yes", "no", "true", "false"}
+_EXECUTION_OUTPUT_MAGIC = b"TCEZ1\0"
+
+
+def encode_execution_output(output: str) -> str | memoryview:
+    """Compress large execution outputs without changing their logical value."""
+    if not isinstance(output, str):
+        raise TypeError("execution output must be text")
+    raw = output.encode("utf-8")
+    if not raw:
+        return output
+    encoded = _EXECUTION_OUTPUT_MAGIC + zlib.compress(raw, level=6)
+    if len(encoded) >= len(raw):
+        return output
+    return sqlite3.Binary(encoded)
+
+
+def decode_execution_output(value: Any) -> str:
+    """Read legacy TEXT rows and compressed BLOB rows identically."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        raw = bytes(value)
+        if raw.startswith(_EXECUTION_OUTPUT_MAGIC):
+            return zlib.decompress(raw[len(_EXECUTION_OUTPUT_MAGIC) :]).decode("utf-8")
+        return raw.decode("utf-8")
+    raise TypeError(f"unsupported execution output type: {type(value).__name__}")
 
 
 @dataclass(frozen=True)
@@ -764,7 +791,7 @@ def validate_outputs(output1: str, output2: str) -> bool:
 
 def _oracle(rows: Sequence[sqlite3.Row]) -> str | None:
     outputs = [
-        row["output"]
+        decode_execution_output(row["output"])
         for row in rows
         if row["checked_submission_type"] == "right_submission"
         and row["result"] == "success_run"
@@ -784,7 +811,7 @@ def _killed(row: sqlite3.Row, oracle: str | None) -> bool:
     if row["result"] in _KILL_RESULTS:
         return True
     return row["result"] == "success_run" and not validate_outputs(
-        row["output"], oracle
+        decode_execution_output(row["output"]), oracle
     )
 
 

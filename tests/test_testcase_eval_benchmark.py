@@ -7,6 +7,8 @@ from scripts import run_testcase_eval_batch
 
 from utils.testcase_eval_benchmark import (
     RunStore,
+    decode_execution_output,
+    encode_execution_output,
     generation_jobs,
     score,
     validate_outputs,
@@ -86,6 +88,19 @@ class ComparatorTests(unittest.TestCase):
         self.assertFalse(validate_outputs("1.000000000002", "1"))
         self.assertFalse(validate_outputs("answer", "Answer"))
         self.assertTrue(validate_outputs("same  spacing\n", "same  spacing"))
+
+    def test_execution_output_encoding_is_lossless_and_backward_compatible(self):
+        self.assertEqual(decode_execution_output("legacy\n"), "legacy\n")
+        self.assertEqual(decode_execution_output(b"legacy bytes\n"), "legacy bytes\n")
+
+        output = ("1234567890 " * 10_000) + "\n"
+        encoded = encode_execution_output(output)
+        self.assertIsInstance(encoded, memoryview)
+        self.assertLess(len(encoded), len(output.encode("utf-8")))
+        self.assertEqual(decode_execution_output(encoded), output)
+
+        self.assertEqual(encode_execution_output(""), "")
+        self.assertEqual(encode_execution_output("x"), "x")
 
 
 class StoreAndScoreTests(unittest.TestCase):
@@ -175,8 +190,22 @@ class StoreAndScoreTests(unittest.TestCase):
                 records.extend(
                     [
                         execution_record(2, "w", 0, "w", "wrong_submission", "0"),
-                        execution_record(2, "w", 0, "r1", "right_submission", "1"),
-                        execution_record(2, "w", 0, "r2", "right_submission", "1"),
+                        execution_record(
+                            2,
+                            "w",
+                            0,
+                            "r1",
+                            "right_submission",
+                            encode_execution_output("1\n" * 1_000),
+                        ),
+                        execution_record(
+                            2,
+                            "w",
+                            0,
+                            "r2",
+                            "right_submission",
+                            "1\n" * 1_000,
+                        ),
                     ]
                 )
                 store.connection.executemany(
