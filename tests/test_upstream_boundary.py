@@ -52,16 +52,16 @@ ADDED = {
     "tests/test_testcase_eval_benchmark.py",
     "tests/test_testcase_eval_lightcp.py",
     "tests/test_tasks.py",
-    "tests/test_tc_bench.py",
+    "tests/test_codecontests_plus.py",
     "tests/test_upstream_boundary.py",
     "tests/test_upstream_differential.py",
     "utils/benchmark.py",
     "utils/fault_coverage_benchmark.py",
-    "utils/tc_bench.py",
+    "utils/codecontests_plus.py",
     "utils/testcase_eval_benchmark.py",
     "utils/testcase_eval_executor.py",
     "utils/testcase_eval_lightcp.py",
-    "scripts/run_tc_bench.py",
+    "scripts/run_codecontests_plus.py",
 }
 
 

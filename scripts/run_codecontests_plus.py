@@ -1,4 +1,4 @@
-"""Run the pinned public-snapshot adaptation of TC-Bench."""
+"""Run the pinned CodeContests+ Verified fault-coverage benchmark."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import json
 import os
 
 from scripts.run_testcase_eval_batch import _preflight as model_preflight
-from utils.tc_bench import (
+from utils.codecontests_plus import (
     DEFAULT_POLICY,
     RunStore,
     audit_programs,
@@ -32,15 +32,16 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--policy", default=DEFAULT_POLICY)
     parser.add_argument("--workers", type=int, default=16)
-    parser.add_argument("--row-index", type=int, action="append", default=[])
+    parser.add_argument("--problem-id", action="append", default=[])
+    parser.add_argument("--smoke-problems", type=int)
     parser.add_argument("--dataset-cache")
-    parser.add_argument("--dataset-parquet", type=Path)
+    parser.add_argument("--dataset-parquet", type=Path, action="append", default=[])
     parser.add_argument("--max-generations-per-problem", type=int)
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--paper", action="store_true")
     parser.add_argument(
         "--lightcp-url",
-        default=os.environ.get("TC_BENCH_LIGHTCP_URL", "http://127.0.0.1:8082"),
+        default=os.environ.get("CCPLUS_LIGHTCP_URL", "http://127.0.0.1:8082"),
     )
     return parser.parse_args()
 
@@ -65,8 +66,9 @@ def main() -> None:
                 prepare_dataset(
                     store,
                     cache_dir=args.dataset_cache,
-                    dataset_parquet=args.dataset_parquet,
-                    row_indices=args.row_index,
+                    dataset_parquets=args.dataset_parquet,
+                    problem_ids=args.problem_id,
+                    smoke_problems=args.smoke_problems,
                 )
             )
         elif args.phase == "audit":

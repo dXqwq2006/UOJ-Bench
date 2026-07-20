@@ -175,37 +175,42 @@ model. Full Task 1 is 10,000 calls and 2,427,720 executions for one policy, or
 20,000 calls and 4,855,440 executions for CoT plus Direct. Use a fresh result
 directory for each model and evaluator fingerprint.
 
-## TC-Bench
+## CodeContests+ Verified
 
-`scripts.run_tc_bench` adapts the pinned public TC-Bench snapshot to the same
-fault-coverage solver interface. It validates 877 problems, 9,347 wrong
-programs, 6,991 correct programs, and the dataset parquet SHA-256. Each problem
-gets `5 * rank` independent generations. Generated inputs must produce one
-consistent output across every accepted solution; invalid candidates remain in
-the PassRate denominator. Valid candidates are then scored against all wrong
-solutions using TC-Bench's whitespace and decimal comparator.
+`scripts.run_codecontests_plus` adapts the pinned public CodeContests+ `1x`
+split to the same fault-coverage interface as TestCase-Eval task 1. It selects
+rows whose published true-positive and true-negative rates are both at least
+`0.9`, then gives each problem 20 independent generations. The dataset's
+validator decides whether a generated input is legal. A published correct
+submission produces the answer, and the dataset's checker judges every
+sampled correct and incorrect submission. Following the paper's 100-per-class
+cap, the adapter uses a reproducible SHA-256 ordering and samples at most 100
+of each role. The resulting metrics are valid-input rate, true-positive rate,
+and true-negative rate.
 
 ```bash
-RESULT=results/tc-bench/gpt-5.6-sol-smoke
-python -m scripts.run_tc_bench --phase prepare --result-dir "$RESULT" \
-  --dataset-parquet /path/to/test-00000-of-00001.parquet \
-  --row-index 0 --row-index 677 --row-index 792
-python -m scripts.run_tc_bench --phase audit --result-dir "$RESULT" --workers 32
-python -m scripts.run_tc_bench --phase preflight --result-dir "$RESULT" \
-  --model gpt-5.6-sol --paper
-python -m scripts.run_tc_bench --phase generate --result-dir "$RESULT" \
-  --model gpt-5.6-sol --paper --workers 16 --max-generations-per-problem 2
-python -m scripts.run_tc_bench --phase judge --result-dir "$RESULT" --workers 64
-python -m scripts.run_tc_bench --phase stats --result-dir "$RESULT"
-python -m scripts.run_tc_bench --phase export --result-dir "$RESULT"
+RESULT=results/codecontests-plus/gpt-5.6-sol-smoke
+python -m scripts.run_codecontests_plus --phase prepare --result-dir "$RESULT" \
+  --smoke-problems 1
+python -m scripts.run_codecontests_plus --phase audit --result-dir "$RESULT" --workers 32
+python -m scripts.run_codecontests_plus --phase preflight --result-dir "$RESULT" \
+  --model gpt-5.6-sol
+python -m scripts.run_codecontests_plus --phase generate --result-dir "$RESULT" \
+  --model gpt-5.6-sol --workers 16 --max-generations-per-problem 1
+python -m scripts.run_codecontests_plus --phase judge --result-dir "$RESULT" --workers 64
+python -m scripts.run_codecontests_plus --phase stats --result-dir "$RESULT"
+python -m scripts.run_codecontests_plus --phase export --result-dir "$RESULT"
 ```
 
-The three-row smoke uses 6 calls and 200 program executions per model. A full
-run uses 46,735 calls and 970,615 program executions per model. The public
-parquet omits the original per-submission `compileAndRunOptions`; compilation
-therefore audits the documented C++20/17/14/11 standards in a fixed order and
-records the selected profile. Results must be labeled as a public-snapshot
-adaptation, not an exact replay of the unpublished per-program configuration.
+The evaluator requires the `codecontests-plus` LightCP profile advertised by
+`/health`. The adapter audits the sampled C++17, Python 2/3, and Java 21
+programs before generation and excludes compilation failures from scoring.
+The public `UNKNOWN` label mixes several languages and is excluded rather than
+guessed. For an official run, omit `--smoke-problems` and
+`--max-generations-per-problem`; the manifest records the dataset revision,
+Verified thresholds, sample rule, selected row indices, compiler audit,
+evaluator fingerprint, and generation budget. Repeated `--dataset-parquet`
+arguments can pin downloaded `1x` shards by SHA-256.
 
 On H100, unprivileged namespaces are disabled. The deployed fallback uses
 `chroot`, UID/GID isolation, `no-new-privs`, `prlimit`, output caps, and wall
