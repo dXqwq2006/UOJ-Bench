@@ -184,6 +184,47 @@ class TCBenchScoringTests(unittest.TestCase):
             ]
             self.assertEqual(values, [{"input": "1", "output": "1\n"}])
 
+    def test_oracle_disagreement_does_not_make_execution_incomplete(self):
+        row = fixture_row()
+        row["solutions"].append({"code": "right2", "lang": "cpp"})
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.tc_bench._load_dataset", return_value=[row]
+            ):
+                prepare_dataset(store, validate_snapshot=False)
+                store.bind_manifest(
+                    {
+                        "model": "model",
+                        "policies": ["testcase_eval_task1_cot"],
+                        "tasks": [1],
+                        "tc_max_generations_per_problem": 1,
+                    }
+                )
+                store.save_generation(generation_record(0))
+                store.connection.execute(
+                    "INSERT INTO materializations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("testcase_eval_task1_cot", 1, "tc:0000", "", 0, "1", "complete", "", 1.0),
+                )
+                store.connection.executemany(
+                    "INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        execution(0, "tc:0000:r:000", "right_submission", "success_run", "1\n"),
+                        execution(0, "tc:0000:r:001", "right_submission", "success_run", "2\n"),
+                        execution(0, "tc:0000:w:000", "wrong_submission", "success_run", "0\n"),
+                        execution(0, "tc:0000:w:001", "wrong_submission", "success_run", "1\n"),
+                    ],
+                )
+                store.connection.commit()
+                self.assertEqual(
+                    refresh_oracles(store),
+                    {"candidates": 1, "valid": 0, "invalid": 1},
+                )
+                summary = score(store)
+
+        self.assertTrue(summary["complete"])
+        self.assertEqual(summary["expected_executions"], 4)
+        self.assertEqual(summary["actual_executions"], 4)
+
 
 if __name__ == "__main__":
     unittest.main()

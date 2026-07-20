@@ -935,12 +935,12 @@ def score(store: RunStore) -> dict[str, Any]:
     expected_executions = store.connection.execute(
         """
         SELECT COALESCE(SUM(programs.count), 0)
-        FROM tc_oracles AS o
+        FROM materializations AS m
         JOIN (
             SELECT problem_id, COUNT(*) AS count
             FROM submissions WHERE dataset_name = ? GROUP BY problem_id
         ) AS programs USING(problem_id)
-        WHERE o.policy = ? AND o.valid = 1
+        WHERE m.policy = ? AND m.task = 1 AND m.status = 'complete'
         """,
         (DATASET_KEY, policy),
     ).fetchone()[0]
