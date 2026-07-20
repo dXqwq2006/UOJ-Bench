@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from utils.tc_bench import (
+    COMPILER_PROFILES,
     DATASET_PARQUET_SHA256,
     RunStore,
     _load_dataset,
@@ -76,6 +77,12 @@ def execution(generation_id, checked_id, checked_type, result, output):
 
 
 class TCBenchDatasetTests(unittest.TestCase):
+    def test_public_snapshot_uses_documented_cpp_standard_fallbacks(self):
+        self.assertEqual(
+            COMPILER_PROFILES["cpp"],
+            ("cpp-gnu++20", "cpp-gnu++17", "cpp-gnu++14", "cpp-gnu++11"),
+        )
+
     def test_offline_parquet_must_match_pinned_sha256(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "test.parquet"

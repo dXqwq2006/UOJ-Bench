@@ -46,7 +46,7 @@ EXPECTED_STATS = {
     "null_problem_ids": 1,
 }
 COMPILER_PROFILES = {
-    "cpp": ("cpp-gnu++17", "cpp-gnu++20", "cpp-gnu++23"),
+    "cpp": ("cpp-gnu++20", "cpp-gnu++17", "cpp-gnu++14", "cpp-gnu++11"),
     "c": ("c-gnu11", "c-gnu17"),
 }
 _KILL_RESULTS = {
