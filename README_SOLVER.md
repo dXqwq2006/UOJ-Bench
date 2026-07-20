@@ -4,6 +4,9 @@ This fork keeps UOJ-Bench's datasets, prompts, UOJ client, patch application, an
 scoring rules pinned to upstream commit `ce1c006`. It replaces only the step that
 turns a task into a candidate artifact.
 
+See [docs/BENCHMARK_MATRIX.md](docs/BENCHMARK_MATRIX.md) for the current
+benchmark, task, solver/competitor, evaluator, and upstream-source inventory.
+
 ```text
 UOJ-Bench task -> Solver session -> typed candidate -> original UOJ evaluation
 ```
