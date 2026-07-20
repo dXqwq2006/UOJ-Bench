@@ -6,7 +6,9 @@ from unittest.mock import patch
 from scripts import run_testcase_eval_batch
 
 from utils.testcase_eval_benchmark import (
+    DATASET_ARTIFACT_SHA256,
     RunStore,
+    _load_dataset,
     generation_jobs,
     score,
     validate_outputs,
@@ -80,6 +82,24 @@ def execution_record(task, submission_id, generation_id, checked_id, checked_typ
 
 
 class ComparatorTests(unittest.TestCase):
+    def test_offline_snapshot_must_match_pinned_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parquet = (
+                Path(directory)
+                / "datasets--TestCase-Eval--problem"
+                / "snapshots"
+                / "b5cc0cc4589f5e38c1b010c24a4c5f513009278e"
+                / "data"
+                / "train.parquet"
+            )
+            parquet.parent.mkdir(parents=True)
+            parquet.write_bytes(b"not the pinned dataset")
+            with self.assertRaisesRegex(
+                ValueError,
+                DATASET_ARTIFACT_SHA256["problem"],
+            ):
+                _load_dataset("problem", None, directory)
+
     def test_official_line_token_numeric_and_boolean_rules(self):
         self.assertTrue(validate_outputs("1  2\nYES", "1 2\nyes"))
         self.assertTrue(validate_outputs("1.0000000000005", "1"))

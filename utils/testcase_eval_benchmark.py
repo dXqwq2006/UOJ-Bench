@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation, localcontext
 from itertools import groupby
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+import hashlib
 import json
 import os
 import sqlite3
@@ -47,6 +48,14 @@ DATASETS = {
         "Raywithyou/TestCase-Eval-Task2",
         "ad6c3af216b088652b6f05d7df331b3858bf916d",
     ),
+}
+DATASET_ARTIFACT_SHA256 = {
+    "problem": "afe300bafe3212b5c7006e5a847b332e85d4031d1124a0871dbe3b1072c40b7e",
+    "submission_all": "0d0fb980fc5b5fec29f922e0ddacbc86ea5672acfcf05aaaed723bf38d669cae",
+    "submission_lite": "44388e5845c8c15cb6fdcc33be35605f7bc718b6910be235676ebdff6647dcd7",
+    "task1_prompt": "732bfac9a27c8db98155d7ab6131b75638fb9b3a41c1c6baa6f2c6f9b2e6e2fc",
+    "task1_direct_prompt": "3365348ea447594511230fb4de945b087542b40ba8edffc448e1c612e238f468",
+    "task2_prompt": "e6f9cdb5e62c4f83f4e24994f5abcd2ea31248d430523e29dcb5212009e9894c",
 }
 PAPER_GENERATIONS = {1: 20, 2: 1}
 PAPER_TEMPERATURE = 1.0
@@ -221,10 +230,34 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _load_dataset(key: str, cache_dir: str | None) -> Any:
+def _load_dataset(
+    key: str,
+    cache_dir: str | None,
+    snapshot_root: str | Path | None = None,
+) -> Any:
+    name, revision = DATASETS[key]
+    if snapshot_root is not None:
+        snapshot = (
+            Path(snapshot_root).resolve()
+            / f"datasets--{name.replace('/', '--')}"
+            / "snapshots"
+            / revision
+        )
+        parquet_files = sorted((snapshot / "data").glob("*.parquet"))
+        if len(parquet_files) != 1:
+            raise ValueError(f"TestCase-Eval {key} snapshot must contain one parquet")
+        with parquet_files[0].open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        expected = DATASET_ARTIFACT_SHA256[key]
+        if digest != expected:
+            raise ValueError(
+                f"TestCase-Eval {key} parquet SHA-256 differs: {digest} != {expected}"
+            )
+        from datasets import load_dataset
+
+        return load_dataset(str(snapshot), split="train", cache_dir=cache_dir)
     from datasets import load_dataset
 
-    name, revision = DATASETS[key]
     return load_dataset(
         name,
         split="train",
@@ -291,12 +324,13 @@ def prepare_dataset(
     store: RunStore,
     *,
     cache_dir: str | None = None,
+    dataset_snapshot_root: str | Path | None = None,
     smoke_problems: int | None = None,
     problem_ids: Sequence[str] = (),
     verify_prompts: bool = True,
 ) -> dict[str, Any]:
     """Load pinned snapshots, validate policy prompts, and stage selected rows."""
-    problem_data = _load_dataset("problem", cache_dir)
+    problem_data = _load_dataset("problem", cache_dir, dataset_snapshot_root)
     problems = {_problem_id(row): dict(row) for row in problem_data}
     if problem_ids:
         selected = sorted({str(value) for value in problem_ids})
@@ -313,12 +347,12 @@ def prepare_dataset(
 
     all_rows = [
         dict(row)
-        for row in _load_dataset("submission_all", cache_dir)
+        for row in _load_dataset("submission_all", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected_set
     ]
     lite_rows = [
         dict(row)
-        for row in _load_dataset("submission_lite", cache_dir)
+        for row in _load_dataset("submission_lite", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected_set
     ]
 
@@ -326,7 +360,11 @@ def prepare_dataset(
         {
             "testcase_eval_upstream_commit": UPSTREAM_COMMIT,
             "dataset_revisions": {
-                key: {"name": value[0], "revision": value[1]}
+                key: {
+                    "name": value[0],
+                    "revision": value[1],
+                    "parquet_sha256": DATASET_ARTIFACT_SHA256[key],
+                }
                 for key, value in DATASETS.items()
             },
             "selected_problem_ids": selected,
@@ -377,7 +415,11 @@ def prepare_dataset(
     prompt_checks: dict[int | str, int] = {1: 0, 2: 0, "direct": 0}
     if verify_prompts:
         prompt_checks = _verify_official_prompts(
-            problems, lite_rows, selected_set, cache_dir
+            problems,
+            lite_rows,
+            selected_set,
+            cache_dir,
+            dataset_snapshot_root,
         )
 
     summary = {
@@ -402,24 +444,25 @@ def _verify_official_prompts(
     lite_rows: Sequence[Mapping[str, Any]],
     selected: set[str],
     cache_dir: str | None,
+    dataset_snapshot_root: str | Path | None,
 ) -> dict[int | str, int]:
     from solution.testcase_eval import prompts
     from solution.testcase_eval_task1_direct import prompts as direct_prompts
 
     expected_task1 = {
         _problem_id(row): _prompt_text(row["prompt"])
-        for row in _load_dataset("task1_prompt", cache_dir)
+        for row in _load_dataset("task1_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
     expected_task1_direct = {
         _problem_id(row): _prompt_text(row["prompt"])
-        for row in _load_dataset("task1_direct_prompt", cache_dir)
+        for row in _load_dataset("task1_direct_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
     lite_by_id = {_submission_id(row): row for row in lite_rows}
     expected_task2 = {
         (_problem_id(row), _submission_id(row)): _prompt_text(row["prompt"])
-        for row in _load_dataset("task2_prompt", cache_dir)
+        for row in _load_dataset("task2_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
 

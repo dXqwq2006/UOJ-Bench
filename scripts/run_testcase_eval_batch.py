@@ -51,6 +51,7 @@ def _arguments(
     parser.add_argument("--smoke-problems", type=int)
     parser.add_argument("--problem-id", action="append", default=[])
     parser.add_argument("--dataset-cache")
+    parser.add_argument("--dataset-snapshot-root", type=Path)
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--paper", action="store_true")
     parser.add_argument("--no-verify-prompts", action="store_true")
@@ -271,6 +272,7 @@ def main(
                 prepare_dataset(
                     store,
                     cache_dir=args.dataset_cache,
+                    dataset_snapshot_root=args.dataset_snapshot_root,
                     smoke_problems=args.smoke_problems,
                     problem_ids=args.problem_id,
                     verify_prompts=not args.no_verify_prompts,
