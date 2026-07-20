@@ -3,6 +3,7 @@ import unittest
 from solution import load_solver
 from solution.api import (
     FeedbackKind,
+    FaultExposureInput,
     GenerationInput,
     HackCandidate,
     HackingInput,
@@ -10,6 +11,8 @@ from solution.api import (
     RepairInput,
     SolutionCandidate,
     SolverFeedback,
+    TestCaseCandidate,
+    TestCaseFormat,
 )
 from solution.prompt import PromptSolver
 from utils.benchmark import solver_metadata
@@ -56,6 +59,22 @@ class PromptSolverTests(unittest.TestCase):
                 self.assertEqual(turn.message, {"content": text})
                 self.assertEqual(turn.usage, {"output_tokens": 7})
                 self.assertEqual(caller.calls, [(session.initial_request, "model")])
+
+    def test_fault_exposure_reuses_uoj_prompt_and_returns_generator(self):
+        caller = FakeCaller("```python\nprint(1)\n```")
+        task = FaultExposureInput(
+            "2000A", "Problem", 42, "wrong source", "C++20 (GCC 13-64)"
+        )
+        session = PromptSolver("model", caller).start_fault_exposure(task)
+        turn = session.next()
+
+        self.assertIn("Write a python program", session.initial_request)
+        self.assertIn("wrong source", session.initial_request)
+        self.assertEqual(
+            turn.candidate,
+            TestCaseCandidate("print(1)\n", TestCaseFormat.PYTHON_GENERATOR),
+        )
+        self.assertTrue(PromptSolver.capabilities.fault_exposure)
 
     def test_parser_is_as_strict_as_upstream(self):
         invalid = [
