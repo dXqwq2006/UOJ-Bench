@@ -5,6 +5,7 @@ from __future__ import annotations
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+import hashlib
 import json
 import re
 import sqlite3
@@ -31,6 +32,7 @@ from utils.testcase_eval_lightcp import _request_json
 SOURCE_COMMIT = "89883430c3503f206def8c5f92d6b55774ba0472"
 DATASET_NAME = "Luoberta/TC-Bench"
 DATASET_REVISION = "f4d482da2d015b6342a12b9891149dcb00566c92"
+DATASET_PARQUET_SHA256 = "9e35749dda4f01239a82eb049d7a29b50681c09a7cfee150983169b57fd687d7"
 PROFILE = "tc-bench"
 DATASET_KEY = "tc_bench"
 DEFAULT_POLICY = "testcase_eval_task1_cot"
@@ -55,7 +57,26 @@ _KILL_RESULTS = {
 _DECIMAL = re.compile(r"^-?\d+\.\d+$")
 
 
-def _load_dataset(cache_dir: str | None) -> Any:
+def _load_dataset(
+    cache_dir: str | None,
+    dataset_parquet: str | Path | None = None,
+) -> Any:
+    if dataset_parquet is not None:
+        path = Path(dataset_parquet).resolve()
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != DATASET_PARQUET_SHA256:
+            raise ValueError(
+                f"TC-Bench parquet SHA-256 differs: {digest} != {DATASET_PARQUET_SHA256}"
+            )
+        from datasets import load_dataset
+
+        return load_dataset(
+            "parquet",
+            data_files=str(path),
+            split="train",
+            cache_dir=cache_dir,
+        )
     from datasets import load_dataset
 
     return load_dataset(
@@ -176,10 +197,11 @@ def prepare_dataset(
     store: RunStore,
     *,
     cache_dir: str | None = None,
+    dataset_parquet: str | Path | None = None,
     row_indices: Sequence[int] = (),
     validate_snapshot: bool = True,
 ) -> dict[str, Any]:
-    rows = [dict(row) for row in _load_dataset(cache_dir)]
+    rows = [dict(row) for row in _load_dataset(cache_dir, dataset_parquet)]
     stats = _snapshot_stats(rows)
     if validate_snapshot and stats != EXPECTED_STATS:
         raise ValueError(f"TC-Bench public snapshot changed: {stats} != {EXPECTED_STATS}")
@@ -202,6 +224,7 @@ def prepare_dataset(
                 "tc_bench": {
                     "name": DATASET_NAME,
                     "revision": DATASET_REVISION,
+                    "parquet_sha256": DATASET_PARQUET_SHA256,
                 }
             },
             "tc_bench_snapshot_stats": stats,

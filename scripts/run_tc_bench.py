@@ -34,6 +34,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--row-index", type=int, action="append", default=[])
     parser.add_argument("--dataset-cache")
+    parser.add_argument("--dataset-parquet", type=Path)
     parser.add_argument("--max-generations-per-problem", type=int)
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--paper", action="store_true")
@@ -64,6 +65,7 @@ def main() -> None:
                 prepare_dataset(
                     store,
                     cache_dir=args.dataset_cache,
+                    dataset_parquet=args.dataset_parquet,
                     row_indices=args.row_index,
                 )
             )

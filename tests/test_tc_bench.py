@@ -5,7 +5,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from utils.tc_bench import (
+    DATASET_PARQUET_SHA256,
     RunStore,
+    _load_dataset,
     _snapshot_stats,
     export_jsonl,
     generation_jobs,
@@ -74,6 +76,13 @@ def execution(generation_id, checked_id, checked_type, result, output):
 
 
 class TCBenchDatasetTests(unittest.TestCase):
+    def test_offline_parquet_must_match_pinned_sha256(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "test.parquet"
+            path.write_bytes(b"not the pinned dataset")
+            with self.assertRaisesRegex(ValueError, DATASET_PARQUET_SHA256):
+                _load_dataset(None, path)
+
     def test_snapshot_shape_stable_keys_and_rank_budget(self):
         rows = [fixture_row(None)]
         self.assertEqual(
