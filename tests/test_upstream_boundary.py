@@ -41,6 +41,10 @@ ADDED = {
     "solution/testcase_eval/__init__.py",
     "solution/testcase_eval/prompts.py",
     "solution/testcase_eval/solver.py",
+    "solution/testcase_eval_task1_cot/__init__.py",
+    "solution/testcase_eval_task1_cot/prompts.py",
+    "solution/testcase_eval_task1_direct/__init__.py",
+    "solution/testcase_eval_task1_direct/prompts.py",
     "tests/test_call_llm.py",
     "tests/test_hack_batch.py",
     "tests/test_solver.py",
@@ -48,12 +52,16 @@ ADDED = {
     "tests/test_testcase_eval_benchmark.py",
     "tests/test_testcase_eval_lightcp.py",
     "tests/test_tasks.py",
+    "tests/test_tc_bench.py",
     "tests/test_upstream_boundary.py",
     "tests/test_upstream_differential.py",
     "utils/benchmark.py",
+    "utils/fault_coverage_benchmark.py",
+    "utils/tc_bench.py",
     "utils/testcase_eval_benchmark.py",
     "utils/testcase_eval_executor.py",
     "utils/testcase_eval_lightcp.py",
+    "scripts/run_tc_bench.py",
 }
 
 
