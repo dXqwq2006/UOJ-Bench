@@ -241,7 +241,7 @@ generated Python, output judges, and oracle programs run through the existing
 LightCP profiles because the H100 host cannot run upstream's `bwrap` setup.
 The prepared benchmark validator/checker remains hidden from the model and is
 used only by the final benchmark judge. Complete variable-size suites and all
-raw model artifacts are stored in `hardtestgen_kits` and
+raw model artifacts are stored in `hardtestgen_calls`, `hardtestgen_kits`, and
 `hardtestgen_suites`. The compatibility layer uses stable de-duplication and a
 category round-robin projection to 20 inputs; missing inputs become invalid
 `ERROR` rows so pipeline failures stay in the benchmark denominator. These two
