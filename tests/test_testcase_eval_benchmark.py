@@ -214,6 +214,30 @@ class PreflightTests(unittest.TestCase):
             ):
                 run_testcase_eval_batch._preflight("model", paper=False)
 
+    def test_gemini_paper_preflight_requires_high_thinking(self):
+        with patch(
+            "scripts.run_testcase_eval_batch.require_paper_generation_settings"
+        ), patch(
+            "solution.llm.call_llm.call_llm_details",
+            return_value=(
+                "```plaintext\n1\n```",
+                {
+                    "request_config": {
+                        "max_output_tokens": 18_000,
+                        "temperature": 1.0,
+                    }
+                },
+                {},
+            ),
+        ), patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            return_value=("1", {"model": "gpt-4.1-mini"}, {}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "thinking_config"):
+                run_testcase_eval_batch._preflight(
+                    "gemini-3.1-pro-preview", paper=True
+                )
+
 
 class ExecutorTests(unittest.TestCase):
     def test_process_limit_and_java_class_rewrite(self):

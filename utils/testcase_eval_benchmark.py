@@ -713,13 +713,13 @@ def require_paper_generation_settings(model: str) -> None:
         raise ValueError("paper mode requires TATU_TEMPERATURE=1.0") from exc
     if temperature != PAPER_TEMPERATURE:
         raise ValueError("paper mode requires TATU_TEMPERATURE=1.0")
+    if os.environ.get("TATU_MAX_OUTPUT_TOKENS") != str(
+        PAPER_REASONING_MAX_OUTPUT_TOKENS
+    ):
+        raise ValueError("paper mode requires 18000 output tokens")
     if model == "gpt-5.6-sol":
         if os.environ.get("TATU_REASONING_EFFORT") not in {"xhigh", "max"}:
             raise ValueError("gpt-5.6-sol paper run requires reasoning effort xhigh")
-        if os.environ.get("TATU_MAX_OUTPUT_TOKENS") != str(
-            PAPER_REASONING_MAX_OUTPUT_TOKENS
-        ):
-            raise ValueError("gpt-5.6-sol paper run requires 18000 output tokens")
         if os.environ.get("TATU_OPENAI_TRANSPORT") != "responses":
             raise ValueError("gpt-5.6-sol paper run requires the Responses transport")
 

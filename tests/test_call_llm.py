@@ -480,12 +480,20 @@ class CallLlmTests(unittest.TestCase):
         )
         payload = session.post.call_args.kwargs["json"]
         self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "system"}]})
+        self.assertEqual(
+            payload["generationConfig"]["thinkingConfig"],
+            {"thinkingLevel": "high", "includeThoughts": True},
+        )
         self.assertEqual(payload["contents"][1]["role"], "model")
         self.assertEqual(payload["contents"][1]["parts"], old_parts)
         message = result["choices"][0]["message"]
         self.assertEqual(message["content"], "public answer")
         self.assertEqual(message["reasoning_content"], "private thought")
         self.assertEqual(message["native_turn"]["parts"], new_parts)
+        self.assertEqual(
+            result["request_config"]["thinking_config"],
+            {"thinkingLevel": "high", "includeThoughts": True},
+        )
         self.assertEqual(
             result["usage"],
             {

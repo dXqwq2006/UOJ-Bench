@@ -502,7 +502,11 @@ def _call_anthropic(history, model, key, base, max_tokens, temperature):
 
 def _call_gemini(history, model, key, base, max_tokens, temperature):
     messages, system = _gemini_messages(history)
-    generation_config = {"maxOutputTokens": max_tokens}
+    thinking_config = {"thinkingLevel": "high", "includeThoughts": True}
+    generation_config = {
+        "maxOutputTokens": max_tokens,
+        "thinkingConfig": thinking_config,
+    }
     if temperature is not None:
         generation_config["temperature"] = temperature
     payload = {"contents": messages, "generationConfig": generation_config}
@@ -545,7 +549,11 @@ def _call_gemini(history, model, key, base, max_tokens, temperature):
         {"role": "model", "parts": copy.deepcopy(parts)},
         candidate.get("finishReason"),
         raw.get("usageMetadata"),
-        {"max_output_tokens": max_tokens, "temperature": temperature},
+        {
+            "max_output_tokens": max_tokens,
+            "temperature": temperature,
+            "thinking_config": thinking_config,
+        },
     )
 
 

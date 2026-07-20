@@ -104,6 +104,22 @@ def _preflight(model: str, paper: bool) -> dict[str, object]:
         }
         if mismatches:
             raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
+    if paper and model == "gemini-3.1-pro-preview":
+        expected = {
+            "max_output_tokens": 18_000,
+            "temperature": 1.0,
+            "thinking_config": {
+                "thinkingLevel": "high",
+                "includeThoughts": True,
+            },
+        }
+        mismatches = {
+            key: (request_config.get(key), value)
+            for key, value in expected.items()
+            if request_config.get(key) != value
+        }
+        if mismatches:
+            raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
     try:
         extracted, extractor_message, extractor_usage = extract_test_input_llm(
             "Test Input:\n1"
