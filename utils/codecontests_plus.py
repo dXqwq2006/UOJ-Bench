@@ -467,7 +467,7 @@ def preflight(base_url: str) -> dict[str, Any]:
         {
             "profile": PROFILE,
             "lang": "cpp-gnu++17",
-            "code": '#include "testlib.h"\nint main(int c,char**v){registerValidation(c,v);inf.readInt(1,1);inf.readEof();}\n',
+            "code": '#include "testlib.h"\nint main(int c,char**v){registerValidation(c,v);inf.readInt(1,1);inf.readEoln();inf.readEof();}\n',
             "sourceName": "main.cpp",
             "tests": [
                 {"id": "valid", "stdin": "1\n", "timeLimitMs": 2000, "memoryLimitMb": 256},
