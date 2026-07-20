@@ -12,6 +12,7 @@ from utils.codecontests_plus import (
     _selected_records,
     _snapshot_stats,
     _validate_problem,
+    execute_pending,
     export_jsonl,
     generation_jobs,
     prepare_dataset,
@@ -231,6 +232,34 @@ class CodeContestsPlusDatasetTests(unittest.TestCase):
 
 
 class CodeContestsPlusScoringTests(unittest.TestCase):
+    @patch("utils.codecontests_plus._execute_program", return_value=[])
+    def test_pending_execution_query_qualifies_joined_problem_id(self, execute):
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.codecontests_plus._load_dataset", return_value=[fixture_row()]
+            ):
+                prepare_dataset(store)
+                audit_all_programs(store)
+                store.bind_manifest({"policies": ["testcase_eval_task1_cot"]})
+                store.connection.execute(
+                    "INSERT INTO materializations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("testcase_eval_task1_cot", 1, PROBLEM_ID, "", 0, "1", "complete", "", 1.0),
+                )
+                store.connection.execute(
+                    "INSERT INTO ccplus_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    ("testcase_eval_task1_cot", PROBLEM_ID, 0, 1, "complete", "1\n", "", 1.0),
+                )
+                store.connection.commit()
+
+                counts = execute_pending(
+                    store,
+                    base_url="http://judge",
+                    workers=1,
+                )
+
+        self.assertEqual(counts, {"program_batches": 4, "executions": 0})
+        self.assertEqual(execute.call_count, 4)
+
     @patch("utils.codecontests_plus._batch_results")
     @patch("utils.codecontests_plus._run_program")
     def test_checker_decides_solution_acceptance(self, run_program, checker):

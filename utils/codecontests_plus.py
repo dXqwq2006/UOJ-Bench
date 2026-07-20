@@ -982,7 +982,7 @@ def execute_pending(
           ON m.policy = c.policy AND m.task = 1
          AND m.problem_id = c.problem_id AND m.generation_id = c.generation_id
         WHERE c.policy = ? AND c.status = 'complete'
-        ORDER BY problem_id, generation_id
+        ORDER BY c.problem_id, c.generation_id
         """,
         (policy,),
     ):
