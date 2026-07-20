@@ -11,6 +11,7 @@ from utils.testcase_eval_benchmark import (
     score,
     validate_outputs,
 )
+from solution.api import SolverCapabilities
 from utils.testcase_eval_executor import _java_source, run_process
 
 
@@ -99,6 +100,7 @@ class StoreAndScoreTests(unittest.TestCase):
 
                 jobs = generation_jobs(
                     store,
+                    model="model",
                     policies=("testcase_eval", "prompt"),
                     tasks=(1, 2),
                     task1_generations=2,
@@ -112,11 +114,39 @@ class StoreAndScoreTests(unittest.TestCase):
                 store.save_generation(generation_record(1, "", 0))
                 remaining = generation_jobs(
                     store,
+                    model="model",
                     policies=("testcase_eval",),
                     tasks=(1,),
                     task1_generations=2,
                 )
                 self.assertEqual([job.generation_id for job in remaining], [1])
+
+    def test_jobs_discover_new_policy_from_solver_capabilities(self):
+        class PaperSolver:
+            capabilities = SolverCapabilities(
+                fault_coverage=True,
+                fault_exposure=True,
+            )
+
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store:
+                insert_problem_and_submissions(store)
+                with patch(
+                    "utils.testcase_eval_benchmark.load_solver",
+                    return_value=PaperSolver(),
+                ) as loader:
+                    jobs = generation_jobs(
+                        store,
+                        model="model",
+                        policies=("paper_solver",),
+                        tasks=(1, 2),
+                        task1_generations=2,
+                    )
+
+        loader.assert_called_once_with("paper_solver", "model")
+        self.assertEqual(len(jobs), 3)
+        self.assertEqual({job.policy for job in jobs}, {"paper_solver"})
+        self.assertEqual({job.task for job in jobs}, {1, 2})
 
     def test_score_matches_task1_union_and_task2_target_exposure(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -194,6 +224,13 @@ class ExecutorTests(unittest.TestCase):
         )
         self.assertEqual(result["result"], "success_run")
         self.assertEqual(result["output"], "hello\n")
+
+        pipe = run_process(
+            ["python3", "-c", "import os; print(os.fstat(0).st_size)"],
+            "hello",
+            timeout=1,
+        )
+        self.assertEqual(pipe["output"], "0\n")
 
         timeout = run_process(
             ["python3", "-c", "while True: pass"],

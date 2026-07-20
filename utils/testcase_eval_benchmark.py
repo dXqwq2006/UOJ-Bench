@@ -15,7 +15,12 @@ import tempfile
 import time
 
 from solution import load_solver
-from solution.api import FaultCoverageInput, FaultExposureInput, TestCaseFormat
+from solution.api import (
+    FaultCoverageInput,
+    FaultExposureInput,
+    TestCaseFormat,
+    solver_capabilities,
+)
 
 
 UPSTREAM_COMMIT = "45275c6f838566e6e148a9eca18edc00be08a305"
@@ -480,16 +485,31 @@ def _existing_generation(
 def generation_jobs(
     store: RunStore,
     *,
+    model: str,
     policies: Sequence[str],
     tasks: Sequence[int],
     task1_generations: int = PAPER_GENERATIONS[1],
     retry_errors: bool = False,
 ) -> list[GenerationJob]:
-    unsupported = set(policies) - {"testcase_eval", "prompt"}
-    if unsupported:
-        raise ValueError(f"unsupported policies: {', '.join(sorted(unsupported))}")
     if set(tasks) - {1, 2}:
         raise ValueError("tasks must contain only 1 or 2")
+
+    capabilities = {
+        policy: solver_capabilities(load_solver(policy, model))
+        for policy in policies
+    }
+    capability_names = {1: "fault_coverage", 2: "fault_exposure"}
+    supported_tasks = {
+        policy: {
+            task
+            for task, capability in capability_names.items()
+            if getattr(policy_capabilities, capability)
+        }
+        for policy, policy_capabilities in capabilities.items()
+    }
+    for task in tasks:
+        if not any(task in supported for supported in supported_tasks.values()):
+            raise ValueError(f"no selected policy supports TestCase-Eval Task {task}")
 
     problems = list(
         store.connection.execute(
@@ -498,23 +518,24 @@ def generation_jobs(
     )
     jobs: list[GenerationJob] = []
     if 1 in tasks:
-        if "testcase_eval" not in policies:
-            raise ValueError("Task 1 requires the testcase_eval policy")
-        for problem in problems:
-            for generation_id in range(task1_generations):
-                jobs.append(
-                    GenerationJob(
-                        "testcase_eval",
-                        1,
-                        problem["problem_id"],
-                        problem["statement"],
-                        "",
-                        "",
-                        "",
-                        generation_id,
-                        json.loads(problem["metadata_json"]),
+        for policy in policies:
+            if 1 not in supported_tasks[policy]:
+                continue
+            for problem in problems:
+                for generation_id in range(task1_generations):
+                    jobs.append(
+                        GenerationJob(
+                            policy,
+                            1,
+                            problem["problem_id"],
+                            problem["statement"],
+                            "",
+                            "",
+                            "",
+                            generation_id,
+                            json.loads(problem["metadata_json"]),
+                        )
                     )
-                )
 
     if 2 in tasks:
         submissions = list(
@@ -530,6 +551,8 @@ def generation_jobs(
             )
         )
         for policy in policies:
+            if 2 not in supported_tasks[policy]:
+                continue
             for submission in submissions:
                 jobs.append(
                     GenerationJob(
@@ -644,6 +667,7 @@ def generate(
     )
     jobs = generation_jobs(
         store,
+        model=model,
         policies=policies,
         tasks=tasks,
         task1_generations=task1_generations,

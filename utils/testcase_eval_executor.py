@@ -67,6 +67,40 @@ def _connect(path: str | os.PathLike[str]) -> sqlite3.Connection:
     return connection
 
 
+def bind_judge_backend(
+    database: str | os.PathLike[str],
+    backend: str,
+) -> None:
+    connection = _connect(database)
+    encoded = json.dumps(backend)
+    row = connection.execute(
+        "SELECT value_json FROM manifest WHERE key = 'judge_backend'"
+    ).fetchone()
+    if row is not None:
+        if row["value_json"] != encoded:
+            connection.close()
+            raise RuntimeError(
+                "result database is already bound to judge backend "
+                f"{row['value_json']}, not {encoded}"
+            )
+    else:
+        execution_count = connection.execute(
+            "SELECT COUNT(*) AS count FROM executions"
+        ).fetchone()["count"]
+        if execution_count:
+            connection.close()
+            raise RuntimeError(
+                "result database already has unbound execution rows; "
+                "use a fresh result directory for a fingerprinted judge backend"
+            )
+        connection.execute(
+            "INSERT INTO manifest(key, value_json) VALUES ('judge_backend', ?)",
+            (encoded,),
+        )
+        connection.commit()
+    connection.close()
+
+
 def _java_source(code: str, class_name: str) -> str:
     main_pattern = r"public\s+class\s+(\w+).*?public\s+static\s+void\s+main"
     match = re.search(main_pattern, code, re.DOTALL)
@@ -264,10 +298,6 @@ def _limited_command(command: Sequence[str], *, java: bool) -> list[str]:
     return [*limits, "--", *command]
 
 
-def _read_limited(path: Path) -> str:
-    with path.open("rb") as handle:
-        return handle.read(OUTPUT_LIMIT_BYTES).decode("utf-8", errors="replace")
-
 
 def run_process(
     command: Sequence[str],
@@ -279,53 +309,46 @@ def run_process(
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="testcase-eval-run-") as directory:
         work = Path(directory)
-        input_path = work / "input"
-        output_path = work / "output"
-        error_path = work / "error"
-        input_path.write_bytes(
-            (input_data + ("" if input_data.endswith("\n") else "\n")).encode(
-                "utf-8", errors="replace"
-            )
-        )
         environment = {
             "HOME": str(work),
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": os.environ.get("PATH", ""),
         }
-        with (
-            input_path.open("rb") as stdin,
-            output_path.open("wb") as stdout,
-            error_path.open("wb") as stderr,
-        ):
-            process = subprocess.Popen(
-                _limited_command(command, java=java),
-                cwd=work,
-                stdin=stdin,
-                stdout=stdout,
-                stderr=stderr,
-                env=environment,
-                start_new_session=True,
+        process = subprocess.Popen(
+            _limited_command(command, java=java),
+            cwd=work,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            start_new_session=True,
+        )
+        benchmark_input = input_data
+        if benchmark_input and not benchmark_input.endswith("\n"):
+            benchmark_input += "\n"
+        try:
+            stdout, stderr = process.communicate(
+                input=benchmark_input.encode("utf-8", errors="replace"),
+                timeout=timeout,
             )
+        except subprocess.TimeoutExpired:
             try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, 9)
-                except ProcessLookupError:
-                    pass
-                process.wait()
-                return {
-                    "result": "time_limit_exceeded",
-                    "output": _read_limited(output_path),
-                    "error": "Execution timeout",
-                    "elapsed": timeout,
-                    "memory_kb": 0,
-                }
+                os.killpg(process.pid, 9)
+            except ProcessLookupError:
+                pass
+            process.communicate()
+            return {
+                "result": "time_limit_exceeded",
+                "output": "",
+                "error": "Execution timeout",
+                "elapsed": timeout,
+                "memory_kb": 0,
+            }
 
         elapsed = time.monotonic() - started
-        output = _read_limited(output_path)
-        error = _read_limited(error_path)
+        output = stdout[:OUTPUT_LIMIT_BYTES].decode("utf-8", errors="replace")
+        error = stderr[:OUTPUT_LIMIT_BYTES].decode("utf-8", errors="replace")
         if process.returncode == 0:
             result = "success_run"
         elif process.returncode in {-9, 137} or any(
@@ -654,9 +677,13 @@ def run_judge(
     *,
     cache_dir: str | os.PathLike[str],
     workers: int,
+    backend: str,
 ) -> dict[str, Any]:
     if workers < 1:
         raise ValueError("workers must be positive")
+    if not backend:
+        raise ValueError("backend identity is required")
+    bind_judge_backend(database, backend)
     materialization = materialize_generations(database, workers)
     programs, compilation = prepare_programs(
         database,
@@ -665,6 +692,7 @@ def run_judge(
     )
     execution = execute_pending(database, programs, workers)
     return {
+        "backend": backend,
         "materialization": materialization,
         "compilation": compilation,
         "execution": execution,

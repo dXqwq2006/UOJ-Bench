@@ -145,6 +145,23 @@ python -m scripts.run_testcase_eval_batch --phase stats \
   --result-dir "$RESULT"
 ```
 
+The judge phase defaults to the pinned container evaluator. A running
+LightCPVerifier with the `testcase-eval` profile can replace only that layer:
+
+```bash
+python -m scripts.run_testcase_eval_batch --phase judge \
+  --result-dir "$RESULT" --workers 64 --judge-backend lightcp \
+  --lightcp-url http://127.0.0.1:8082
+```
+
+For a full run, start the LightCP container with at least `--shm-size=8g`;
+go-judge stores cached programs in `/dev/shm`, and Docker's 64 MiB default is
+insufficient.
+
+The selected judge backend and its toolchain fingerprint are stored in the result
+manifest. Use a fresh result directory when changing evaluator builds so execution
+rows cannot be mixed.
+
 The extractor endpoint must support `POST /responses`, structured JSON output,
 and the exact `gpt-4.1-mini` model. Preflight fails closed when that model is
 unavailable; do not substitute another extractor in a paper-labeled run.

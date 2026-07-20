@@ -36,7 +36,6 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
     parser.add_argument(
         "--policy",
         action="append",
-        choices=("testcase_eval", "prompt"),
         dest="policies",
     )
     parser.add_argument("--task", type=int, action="append", choices=(1, 2))
@@ -53,7 +52,20 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
     parser.add_argument("--paper", action="store_true")
     parser.add_argument("--no-verify-prompts", action="store_true")
     parser.add_argument("--image", default=DEFAULT_IMAGE)
+    parser.add_argument(
+        "--judge-backend",
+        choices=("container", "lightcp"),
+        default=os.environ.get("TESTCASE_EVAL_JUDGE_BACKEND", "container"),
+    )
+    parser.add_argument(
+        "--lightcp-url",
+        default=os.environ.get(
+            "TESTCASE_EVAL_LIGHTCP_URL",
+            "http://127.0.0.1:8082",
+        ),
+    )
     parser.add_argument("--inside-container", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--judge-identity", help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.tasks = sorted(set(args.task or default_tasks or (1, 2)))
     args.policies = sorted(set(args.policies or ("testcase_eval",)))
@@ -133,6 +145,13 @@ def _run_docker(args: argparse.Namespace) -> None:
         ],
         check=True,
     )
+    image_id = subprocess.check_output(
+        ["docker", "image", "inspect", "--format", "{{.Id}}", args.image],
+        text=True,
+    ).strip()
+    if not image_id:
+        raise RuntimeError(f"docker image {args.image!r} has no content ID")
+    judge_identity = f"container:{image_id}"
     result_dir = args.result_dir.resolve()
     result_dir.mkdir(parents=True, exist_ok=True)
     command = [
@@ -169,6 +188,10 @@ def _run_docker(args: argparse.Namespace) -> None:
         "/results",
         "--workers",
         str(args.workers),
+        "--judge-backend",
+        "container",
+        "--judge-identity",
+        judge_identity,
         "--inside-container",
     ]
     subprocess.run(command, check=True)
@@ -184,6 +207,19 @@ def main(default_tasks: Sequence[int] | None = None) -> None:
         _print(_preflight(args.model, args.paper))
         return
     if args.phase == "judge":
+        if args.judge_backend == "lightcp":
+            if args.inside_container:
+                raise RuntimeError("LightCP judge must run outside the judge container")
+            from utils.testcase_eval_lightcp import run_judge
+
+            _print(
+                run_judge(
+                    database,
+                    base_url=args.lightcp_url,
+                    workers=args.workers,
+                )
+            )
+            return
         if not args.inside_container:
             _run_docker(args)
             return
@@ -194,6 +230,7 @@ def main(default_tasks: Sequence[int] | None = None) -> None:
                 database,
                 cache_dir=args.result_dir / "compile-cache",
                 workers=args.workers,
+                backend=args.judge_identity,
             )
         )
         return

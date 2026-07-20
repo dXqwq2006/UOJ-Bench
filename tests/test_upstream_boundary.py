@@ -46,12 +46,14 @@ ADDED = {
     "tests/test_solver.py",
     "tests/test_testcase_eval.py",
     "tests/test_testcase_eval_benchmark.py",
+    "tests/test_testcase_eval_lightcp.py",
     "tests/test_tasks.py",
     "tests/test_upstream_boundary.py",
     "tests/test_upstream_differential.py",
     "utils/benchmark.py",
     "utils/testcase_eval_benchmark.py",
     "utils/testcase_eval_executor.py",
+    "utils/testcase_eval_lightcp.py",
 }
 
 
