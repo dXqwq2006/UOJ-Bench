@@ -312,6 +312,52 @@ weaker than go-judge namespace isolation and must run only the public benchmark
 sources. Use the Docker/go-judge evaluator on a host that permits namespaces
 for an isolation-equivalent final run.
 
+## HardTestGen
+
+`solution/hardtestgen/` ports the two-stage pipeline from
+LeiLiLab/HardTestGen commit `0355315`. The first independent model call writes
+the Python input validator and optional output-judging function. The second
+call writes ten small direct inputs plus RPGen/SPGen and HackGen Python
+generators. Generated inputs are filtered by the generated validator, then up
+to five published correct programs produce outputs; two exact-consensus
+oracles are required, matching the current GitHub implementation.
+
+The upstream prompt TOMLs are vendored unchanged. Only execution is adapted:
+generated Python, output judges, and oracle programs run through the existing
+LightCP profiles because the H100 host cannot run upstream's `bwrap` setup.
+The prepared benchmark validator/checker remains hidden from the model and is
+used only by the final benchmark judge. Complete variable-size suites and all
+raw model artifacts are stored in `hardtestgen_kits` and
+`hardtestgen_suites`. The compatibility layer uses stable de-duplication and a
+category round-robin projection to 20 inputs; missing inputs become invalid
+`ERROR` rows so pipeline failures stay in the benchmark denominator. These two
+reproducibility choices are recorded as adapter differences in the manifest.
+
+Start with a fresh database prepared by either existing benchmark runner. For
+CodeContests+, run its compile `audit` phase before this sequence.
+
+```bash
+export TATU_API_KEY=...
+export TATU_TEMPERATURE=0.1
+export TATU_MAX_OUTPUT_TOKENS=5120
+
+RESULT=results/testcase-eval-hardtestgen/smoke
+python -m scripts.test_paper_hardtestgen --phase preflight \
+  --result-dir "$RESULT"
+python -m scripts.test_paper_hardtestgen --phase generate-kits \
+  --result-dir "$RESULT" --model gpt-5.6-sol --workers 16 --github-settings
+python -m scripts.test_paper_hardtestgen --phase generate-suites \
+  --result-dir "$RESULT" --workers 32
+python -m scripts.test_paper_hardtestgen --phase judge \
+  --result-dir "$RESULT" --workers 64
+python -m scripts.test_paper_hardtestgen --phase stats \
+  --result-dir "$RESULT"
+```
+
+`--retry-errors` retries failed kit calls or suite execution while preserving
+completed checkpoints. Do not retry a projected suite after its benchmark
+executions have been written; use a fresh result directory for that case.
+
 ## Hacking batches
 
 The batch runner uses the official Hacking Easy and Hard inputs. Easy is the
