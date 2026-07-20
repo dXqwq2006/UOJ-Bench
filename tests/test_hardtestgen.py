@@ -281,10 +281,24 @@ class HardTestGenTests(unittest.TestCase):
             }
 
         with patch("solution.hardtestgen.lightcp._request_json", request):
-            results = HardTestGenLightCP("http://lightcp", "testcase-eval").run_many(
+            results = HardTestGenLightCP("http://lightcp", "codecontests-plus").run_many(
                 "python3", "source", ["x", "y"], time_limit_ms=1, memory_limit_mb=1
             )
         self.assertEqual([result.stdout for result in results], ["a", "b"])
+
+    def test_testcase_eval_uses_single_custom_test_endpoint(self):
+        paths = []
+
+        def request(_base, path, payload=None):
+            paths.append(path)
+            return {"status": "exited", "stdout": payload["stdin"]}
+
+        with patch("solution.hardtestgen.lightcp._request_json", request):
+            results = HardTestGenLightCP("http://lightcp", "testcase-eval").run_many(
+                "python3", "source", ["x", "y"], time_limit_ms=1, memory_limit_mb=1
+            )
+        self.assertEqual([result.stdout for result in results], ["x", "y"])
+        self.assertEqual(paths, ["/custom-test", "/custom-test"])
 
 
 if __name__ == "__main__":

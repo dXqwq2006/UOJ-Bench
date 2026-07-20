@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Mapping, Sequence
 
 from utils.testcase_eval_lightcp import _request_json
@@ -53,6 +54,20 @@ class HardTestGenLightCP:
         if not inputs:
             return []
         compiler_language = self._language(language)
+        if self.profile == "testcase-eval":
+            with ThreadPoolExecutor(max_workers=min(4, len(inputs))) as pool:
+                return list(
+                    pool.map(
+                        lambda value: self._run_one(
+                            compiler_language,
+                            source,
+                            value,
+                            time_limit_ms,
+                            memory_limit_mb,
+                        ),
+                        inputs,
+                    )
+                )
         response = _request_json(
             self.base_url,
             "/custom-test/batch",
@@ -81,6 +96,29 @@ class HardTestGenLightCP:
             if isinstance(value, Mapping)
         }
         return [self._result(by_id.get(str(index))) for index in range(len(inputs))]
+
+    def _run_one(
+        self,
+        language: str,
+        source: str,
+        stdin: str,
+        time_limit_ms: int,
+        memory_limit_mb: int,
+    ) -> ExecutionResult:
+        response = _request_json(
+            self.base_url,
+            "/custom-test",
+            {
+                "profile": self.profile,
+                "lang": language,
+                "code": source,
+                "sourceName": self._source_name(language),
+                "stdin": stdin,
+                "timeLimitMs": time_limit_ms,
+                "memoryLimitMb": memory_limit_mb,
+            },
+        )
+        return self._result(response)
 
     def _language(self, language: str) -> str:
         normalized = language.strip()
