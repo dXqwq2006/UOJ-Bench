@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -6,9 +8,11 @@ from unittest.mock import patch
 from scripts import run_testcase_eval_batch
 
 from utils.testcase_eval_benchmark import (
+    GenerationJob,
     RunStore,
     decode_execution_output,
     encode_execution_output,
+    generate,
     generation_jobs,
     score,
     validate_outputs,
@@ -162,6 +166,65 @@ class StoreAndScoreTests(unittest.TestCase):
         self.assertEqual(len(jobs), 3)
         self.assertEqual({job.policy for job in jobs}, {"paper_solver"})
         self.assertEqual({job.task for job in jobs}, {1, 2})
+
+    def test_replicated_generation_persists_the_first_success_only(self):
+        job = GenerationJob(
+            policy="testcase_eval",
+            task=2,
+            problem_id="2000A",
+            problem_statement="Problem",
+            submission_id="w",
+            submission_code="print(1)",
+            submission_language="Python 3",
+            generation_id=0,
+            metadata={},
+        )
+        plans = iter(
+            (
+                (0.04, "complete", "late"),
+                (0.005, "request_error", ""),
+                (0.01, "complete", "first"),
+                (0.02, "request_error", ""),
+            )
+        )
+        plan_lock = threading.Lock()
+
+        def fake_generate(_job, _model):
+            with plan_lock:
+                delay, status, candidate = next(plans)
+            time.sleep(delay)
+            record = generation_record(2, "w", 0)
+            record["status"] = status
+            record["candidate"] = candidate
+            record["error"] = "" if status == "complete" else "gateway error"
+            return record
+
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.testcase_eval_benchmark.generation_jobs",
+                return_value=[job],
+            ), patch(
+                "utils.testcase_eval_benchmark._generate_one",
+                side_effect=fake_generate,
+            ) as request:
+                counts = generate(
+                    store,
+                    model="model",
+                    policies=("testcase_eval",),
+                    tasks=(2,),
+                    workers=1,
+                    request_replicas=4,
+                )
+                row = store.connection.execute(
+                    "SELECT status, candidate FROM generations"
+                ).fetchone()
+
+        self.assertEqual(
+            counts,
+            {"scheduled": 1, "complete": 1, "request_error": 0},
+        )
+        self.assertEqual((row["status"], row["candidate"]), ("complete", "first"))
+        self.assertEqual(request.call_count, 4)
 
     def test_score_matches_task1_union_and_task2_target_exposure(self):
         with tempfile.TemporaryDirectory() as directory:

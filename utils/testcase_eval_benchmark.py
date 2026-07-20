@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 from itertools import groupby
@@ -671,6 +671,100 @@ def _generate_one(job: GenerationJob, model: str) -> dict[str, Any]:
         }
 
 
+def _timed_generate_one(
+    job: GenerationJob,
+    model: str,
+) -> tuple[int, dict[str, Any]]:
+    record = _generate_one(job, model)
+    return (time.monotonic_ns(), record)
+
+
+def _generate_replicated(
+    store: RunStore,
+    *,
+    jobs: Sequence[GenerationJob],
+    model: str,
+    workers: int,
+    request_replicas: int,
+    counts: dict[str, int],
+) -> None:
+    """Race bounded request replicas and persist only the first success."""
+    job_iterator = iter(enumerate(jobs))
+    states: dict[int, dict[str, Any]] = {}
+    futures: dict[Any, int] = {}
+    completed_jobs = 0
+
+    with ThreadPoolExecutor(max_workers=workers * request_replicas) as pool:
+        def schedule_job() -> bool:
+            try:
+                index, job = next(job_iterator)
+            except StopIteration:
+                return False
+            siblings = [
+                pool.submit(_timed_generate_one, job, model)
+                for _ in range(request_replicas)
+            ]
+            states[index] = {
+                "remaining": request_replicas,
+                "selected": None,
+                "last_error": None,
+                "siblings": siblings,
+            }
+            futures.update((future, index) for future in siblings)
+            return True
+
+        for _ in range(min(workers, len(jobs))):
+            schedule_job()
+
+        while futures:
+            done, _pending = wait(futures, return_when=FIRST_COMPLETED)
+            completed_attempts = []
+            for future in done:
+                index = futures.pop(future)
+                if future.cancelled():
+                    completed_attempts.append((float("inf"), index, None))
+                else:
+                    completed_at, record = future.result()
+                    completed_attempts.append((completed_at, index, record))
+
+            for _completed_at, index, record in sorted(
+                completed_attempts,
+                key=lambda item: item[0],
+            ):
+                state = states[index]
+                state["remaining"] -= 1
+                if state["selected"] is None and record is not None:
+                    if record["status"] == "complete":
+                        state["selected"] = record
+                        store.save_generation(record)
+                        counts["complete"] += 1
+                        completed_jobs += 1
+                        for sibling in state["siblings"]:
+                            sibling.cancel()
+                    else:
+                        state["last_error"] = record
+
+                if state["remaining"] != 0:
+                    continue
+                if state["selected"] is None:
+                    error_record = state["last_error"]
+                    if error_record is None:
+                        raise RuntimeError("all replicated generation requests vanished")
+                    store.save_generation(error_record)
+                    counts["request_error"] += 1
+                    completed_jobs += 1
+                del states[index]
+                schedule_job()
+
+                if completed_jobs % 10 == 0 or completed_jobs == len(jobs):
+                    print(
+                        f"generation {completed_jobs}/{len(jobs)} "
+                        f"complete={counts['complete']} "
+                        f"errors={counts['request_error']}",
+                        flush=True,
+                    )
+
+
 def generate(
     store: RunStore,
     *,
@@ -680,9 +774,12 @@ def generate(
     workers: int,
     task1_generations: int = PAPER_GENERATIONS[1],
     retry_errors: bool = False,
+    request_replicas: int = 1,
 ) -> dict[str, int]:
     if workers < 1:
         raise ValueError("workers must be positive")
+    if request_replicas < 1:
+        raise ValueError("request_replicas must be positive")
     store.bind_manifest(
         {
             "model": model,
@@ -702,6 +799,17 @@ def generate(
     )
     counts = {"scheduled": len(jobs), "complete": 0, "request_error": 0}
     if not jobs:
+        return counts
+
+    if request_replicas > 1:
+        _generate_replicated(
+            store,
+            jobs=jobs,
+            model=model,
+            workers=workers,
+            request_replicas=request_replicas,
+            counts=counts,
+        )
         return counts
 
     with ThreadPoolExecutor(max_workers=workers) as pool:

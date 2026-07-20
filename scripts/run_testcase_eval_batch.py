@@ -47,6 +47,12 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
     )
     parser.add_argument("--smoke-problems", type=int)
     parser.add_argument("--problem-id", action="append", default=[])
+    parser.add_argument(
+        "--request-replicas",
+        type=int,
+        default=1,
+        help="race this many API requests per logical generation",
+    )
     parser.add_argument("--dataset-cache")
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--paper", action="store_true")
@@ -258,6 +264,7 @@ def main(default_tasks: Sequence[int] | None = None) -> None:
                     workers=args.workers,
                     task1_generations=args.task1_generations,
                     retry_errors=args.retry_errors,
+                    request_replicas=args.request_replicas,
                 )
             )
         else:
