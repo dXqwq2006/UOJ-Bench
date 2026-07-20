@@ -211,6 +211,16 @@ class HardTestGenPipeline:
                 generated_inputs=tuple(generated),
                 error="all consensus outputs were invalid",
             )
+        suite_bytes = sum(
+            len(case.input.encode("utf-8")) + len(case.output.encode("utf-8"))
+            for case in cases
+        )
+        if suite_bytes > 500 * 1024 * 1024:
+            return SuiteResult(
+                "test_cases_size_limit_exceeded",
+                generated_inputs=tuple(generated),
+                error=f"suite is {suite_bytes} bytes",
+            )
         return SuiteResult("complete", cases, tuple(generated))
 
     def _generate_inputs(
@@ -304,6 +314,7 @@ print("Result: " + json.dumps(accepted), end="")
     ) -> list[str]:
         if generator_source is None:
             return []
+        started = time.monotonic()
         source = f'''{generator_source}
 
 {validator}
@@ -321,6 +332,8 @@ else:
             "python3", source, [""] * attempts,
             time_limit_ms=5_000, memory_limit_mb=15_360,
         )
+        if time.monotonic() - started > 40:
+            return []
         values = [
             result.stdout[len("Result: "):]
             for result in results
@@ -338,9 +351,13 @@ else:
         required = min(2, len(oracles))
         if required == 0:
             return None, "output_generation_no_code_solutions"
+        overall_started = time.monotonic()
         input_values = [item.content for item in inputs]
         previous: list[list[str | None]] = []
         for oracle in oracles:
+            if time.monotonic() - overall_started > 240:
+                return None, "output_generation_time_limit_exceeded"
+            solution_started = time.monotonic()
             results = executor.run_many(
                 oracle.language,
                 oracle.source,
@@ -348,6 +365,8 @@ else:
                 time_limit_ms=5_000,
                 memory_limit_mb=15_360,
             )
+            if time.monotonic() - solution_started > 50:
+                continue
             if len(results) != len(inputs):
                 continue
             outputs: list[str | None] = [
@@ -407,10 +426,13 @@ print("Result: " + ("True" if verdict else "False"), end="")
             )
             for input_value, candidate, reference in zip(inputs, candidates, references)
         ]
+        started = time.monotonic()
         results = executor.run_many(
             "python3", source, payloads,
             time_limit_ms=5_000, memory_limit_mb=15_360,
         )
+        if time.monotonic() - started > 15:
+            return []
         if len(results) != len(payloads):
             return []
         return [
