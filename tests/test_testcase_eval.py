@@ -22,6 +22,8 @@ from solution.api import (
 )
 from solution.testcase_eval import TestCaseEvalSolver
 from solution.testcase_eval.solver import _EXTRACTOR_PROMPT, extract_test_input
+from solution.testcase_eval_task1_cot.prompts import TASK1_COT
+from solution.testcase_eval_task1_direct.prompts import TASK1_DIRECT
 
 
 class FakeCaller:
@@ -193,6 +195,52 @@ class TestCaseEvalSolverTests(unittest.TestCase):
                     "wrong",
                     max_trials=2,
                 )
+
+
+class TestCaseEvalTask1PolicyTests(unittest.TestCase):
+    def test_pinned_prompt_templates(self):
+        self.assertEqual(
+            hashlib.sha256(TASK1_COT.encode()).hexdigest(),
+            "fb77160f1eeeabb2d8ef9f64fb3068774c1bca37a12ac3b0769c7af77e7ba66f",
+        )
+        self.assertEqual(
+            hashlib.sha256(TASK1_DIRECT.encode()).hexdigest(),
+            "7359a51877cb37773c31601b3fabf4b2da64c0e1932b856f5960eb56e990be7e",
+        )
+
+    def test_cot_and_direct_are_strict_fault_coverage_solvers(self):
+        for policy, ending in (
+            ("testcase_eval_task1_cot", "Think step by step."),
+            ("testcase_eval_task1_direct", "Only output the test input, no explanations."),
+        ):
+            with self.subTest(policy=policy):
+                solver = load_solver(policy, "model")
+                caller = FakeCaller("```plaintext\n1\n7\n```")
+                solver.call_details = caller
+                session = solver.start_fault_coverage(
+                    FaultCoverageInput("2000A", "Problem statement")
+                )
+                turn = session.next()
+
+                self.assertTrue(session.initial_request.endswith(ending))
+                self.assertEqual(turn.candidate, TestCaseCandidate("1\n7"))
+                self.assertTrue(solver.capabilities.fault_coverage)
+                self.assertFalse(solver.capabilities.fault_exposure)
+                self.assertFalse(solver.capabilities.hacking)
+
+    def test_malformed_task1_response_never_uses_fallback_extractor(self):
+        solver = load_solver("testcase_eval_task1_cot", "model")
+        solver.call_details = FakeCaller("Test Input:\n1")
+        with patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            side_effect=AssertionError("fallback must not run"),
+        ):
+            turn = solver.start_fault_coverage(
+                FaultCoverageInput("2000A", "Problem")
+            ).next()
+
+        self.assertIsNone(turn.candidate)
+        self.assertEqual(turn.error, "no test input found")
 
 
 if __name__ == "__main__":

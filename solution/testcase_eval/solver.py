@@ -220,7 +220,7 @@ class _OneShotSession:
         self,
         model: str,
         call_details: CallDetails,
-        extract_details: ExtractDetails,
+        extract_details: Optional[ExtractDetails],
         prompt: str,
         candidate_type,
     ):
@@ -243,7 +243,7 @@ class _OneShotSession:
         self._append_assistant(raw_text, message)
         test_input = extract_test_input(raw_text)
         error = None
-        if test_input is None:
+        if test_input is None and self.extract_details is not None:
             try:
                 test_input, extractor_message, extractor_usage = self.extract_details(raw_text)
                 message = {"generation": message, "extractor": extractor_message}
@@ -285,3 +285,41 @@ class _OneShotSession:
             self.history.append({"role": "assistant", "content": "[ANSWER]" + raw_text})
         else:
             self.history.append({"role": "assistant", "content": raw_text})
+
+
+class TestCaseEvalTask1Solver(TestCaseEvalSolver):
+    """Strict Task 1 policy with no model-based extraction fallback."""
+
+    capabilities = SolverCapabilities(
+        generation=False,
+        hacking=False,
+        repair=False,
+        fault_coverage=True,
+        fault_exposure=False,
+        generation_feedback=False,
+        hacking_feedback=False,
+        repair_feedback=False,
+    )
+
+    def __init__(self, model: str, prompt_builder, call_details=None):
+        super().__init__(model, call_details)
+        self.prompt_builder = prompt_builder
+
+    def start_hacking(self, task: HackingInput) -> SolverSession[HackCandidate]:
+        raise NotImplementedError("Task 1 solvers do not support hacking")
+
+    def start_fault_coverage(
+        self, task: FaultCoverageInput
+    ) -> SolverSession[TestCaseCandidate]:
+        return _OneShotSession(
+            self.model,
+            self.call_details,
+            None,
+            self.prompt_builder(task),
+            TestCaseCandidate,
+        )
+
+    def start_fault_exposure(
+        self, task: FaultExposureInput
+    ) -> SolverSession[TestCaseCandidate]:
+        raise NotImplementedError("Task 1 solvers do not support fault exposure")
