@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 from itertools import groupby
 from pathlib import Path
@@ -18,9 +16,9 @@ from solution import load_solver
 from solution.api import (
     FaultCoverageInput,
     FaultExposureInput,
-    TestCaseFormat,
     solver_capabilities,
 )
+from utils.fault_coverage_benchmark import GenerationJob, run_generation_jobs
 
 
 UPSTREAM_COMMIT = "45275c6f838566e6e148a9eca18edc00be08a305"
@@ -55,19 +53,6 @@ PAPER_TEMPERATURE = 1.0
 PAPER_REASONING_MAX_OUTPUT_TOKENS = 18_000
 _KILL_RESULTS = {"runtime_error", "time_limit_exceeded", "memory_limit_exceeded"}
 _BOOL_TOKENS = {"yes", "no", "true", "false"}
-
-
-@dataclass(frozen=True)
-class GenerationJob:
-    policy: str
-    task: int
-    problem_id: str
-    problem_statement: str
-    submission_id: str
-    submission_code: str
-    submission_language: str
-    generation_id: int
-    metadata: Mapping[str, Any]
 
 
 class RunStore:
@@ -599,72 +584,6 @@ def generation_jobs(
     return selected
 
 
-def _generate_one(job: GenerationJob, model: str) -> dict[str, Any]:
-    prompt = ""
-    try:
-        solver = load_solver(job.policy, model)
-        if job.task == 1:
-            session = solver.start_fault_coverage(
-                FaultCoverageInput(
-                    job.problem_id,
-                    job.problem_statement,
-                    job.metadata,
-                )
-            )
-        else:
-            submission_id: Any = job.submission_id
-            if job.submission_id.isdigit():
-                submission_id = int(job.submission_id)
-            session = solver.start_fault_exposure(
-                FaultExposureInput(
-                    job.problem_id,
-                    job.problem_statement,
-                    submission_id,
-                    job.submission_code,
-                    job.submission_language,
-                    job.metadata,
-                )
-            )
-        prompt = session.initial_request
-        turn = session.next()
-        candidate = turn.candidate
-        return {
-            "policy": job.policy,
-            "task": job.task,
-            "problem_id": job.problem_id,
-            "submission_id": job.submission_id,
-            "generation_id": job.generation_id,
-            "prompt": prompt,
-            "raw_text": turn.raw_text,
-            "candidate": candidate.content if candidate is not None else "ERROR",
-            "candidate_format": (
-                candidate.format.value
-                if candidate is not None
-                else TestCaseFormat.RAW_INPUT.value
-            ),
-            "message": turn.message,
-            "usage": turn.usage,
-            "status": "complete",
-            "error": turn.error or "",
-        }
-    except Exception as exc:
-        return {
-            "policy": job.policy,
-            "task": job.task,
-            "problem_id": job.problem_id,
-            "submission_id": job.submission_id,
-            "generation_id": job.generation_id,
-            "prompt": prompt,
-            "raw_text": "",
-            "candidate": "",
-            "candidate_format": TestCaseFormat.RAW_INPUT.value,
-            "message": {},
-            "usage": {},
-            "status": "request_error",
-            "error": f"{type(exc).__name__}: {exc}",
-        }
-
-
 def generate(
     store: RunStore,
     *,
@@ -694,23 +613,9 @@ def generate(
         task1_generations=task1_generations,
         retry_errors=retry_errors,
     )
-    counts = {"scheduled": len(jobs), "complete": 0, "request_error": 0}
     if not jobs:
-        return counts
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_generate_one, job, model): job for job in jobs}
-        for completed, future in enumerate(as_completed(futures), 1):
-            record = future.result()
-            store.save_generation(record)
-            counts[record["status"]] += 1
-            if completed % 10 == 0 or completed == len(futures):
-                print(
-                    f"generation {completed}/{len(futures)} "
-                    f"complete={counts['complete']} errors={counts['request_error']}",
-                    flush=True,
-                )
-    return counts
+        return {"scheduled": 0, "complete": 0, "request_error": 0}
+    return run_generation_jobs(store, jobs, model=model, workers=workers)
 
 
 def effective_model_request() -> dict[str, Any]:
