@@ -62,6 +62,16 @@ ADDED = {
     "utils/testcase_eval_executor.py",
     "utils/testcase_eval_lightcp.py",
     "scripts/run_codecontests_plus.py",
+    "scripts/test_paper_hardtestgen.py",
+    "solution/hardtestgen/__init__.py",
+    "solution/hardtestgen/api.py",
+    "solution/hardtestgen/lightcp.py",
+    "solution/hardtestgen/pipeline.py",
+    "solution/hardtestgen/prompt_templates/test_cases_kit_prompt_ig.toml",
+    "solution/hardtestgen/prompt_templates/test_cases_kit_prompt_iv_and_ojf.toml",
+    "solution/hardtestgen/prompts.py",
+    "tests/test_hardtestgen.py",
+    "utils/hardtestgen_benchmark.py",
 }
 
 
