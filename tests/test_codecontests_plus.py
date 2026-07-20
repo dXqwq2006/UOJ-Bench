@@ -50,6 +50,12 @@ def fixture_row(*, tpr=0.95, tnr=0.91):
     }
 
 
+def fixture_problem(problem_id, *, tpr=0.95, tnr=0.91):
+    row = fixture_row(tpr=tpr, tnr=tnr)
+    row["id"] = problem_id
+    return row
+
+
 def generation_record(generation_id):
     return {
         "policy": "testcase_eval_task1_cot",
@@ -166,12 +172,57 @@ class CodeContestsPlusDatasetTests(unittest.TestCase):
         self.assertEqual(summary["generations"], 20)
         self.assertEqual([job.generation_id for job in jobs], [0, 1, 2])
         self.assertEqual([job.generation_id for job in remaining], [1, 2])
+        self.assertNotIn("problem_sampling", manifest)
         self.assertEqual(
             manifest["dataset_revisions"]["codecontests_plus_verified"][
                 "local_artifacts"
             ][0]["sha256"],
             hashlib.sha256(b"fixture").hexdigest(),
         )
+
+    def test_problem_sample_is_fixed_uniform_and_order_independent(self):
+        rows = [fixture_problem(f"{index}_A") for index in range(12)]
+        rows.append(fixture_problem("unverified", tnr=0.89))
+
+        def prepare(dataset):
+            with tempfile.TemporaryDirectory() as directory:
+                with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                    "utils.codecontests_plus._load_dataset", return_value=dataset
+                ):
+                    summary = prepare_dataset(
+                        store,
+                        sample_problems=5,
+                        sample_seed="fixed-seed",
+                    )
+                    return summary, store.manifest()
+
+        first, first_manifest = prepare(rows)
+        second, second_manifest = prepare(list(reversed(rows)))
+
+        self.assertEqual(first["problem_keys"], second["problem_keys"])
+        self.assertEqual(len(first["problem_keys"]), 5)
+        sampling = first_manifest["problem_sampling"]
+        self.assertEqual(sampling["method"], "sha256-minhash")
+        self.assertEqual(sampling["seed"], "fixed-seed")
+        self.assertEqual(sampling["verified_population"], 12)
+        self.assertEqual(sampling["sample_size"], 5)
+        self.assertEqual(
+            sampling["selected_problem_keys"],
+            second_manifest["problem_sampling"]["selected_problem_keys"],
+        )
+
+    def test_problem_sample_rejects_conflicting_or_oversized_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.codecontests_plus._load_dataset",
+                return_value=[fixture_row()],
+            ):
+                with self.assertRaisesRegex(ValueError, "cannot be combined"):
+                    prepare_dataset(store, sample_problems=1, smoke_problems=1)
+                with self.assertRaisesRegex(
+                    ValueError, "exceeds the Verified population"
+                ):
+                    prepare_dataset(store, sample_problems=2)
 
     def test_compile_audit_may_exclude_failures_but_keeps_an_oracle(self):
         with tempfile.TemporaryDirectory() as directory:

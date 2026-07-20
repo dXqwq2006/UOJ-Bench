@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from bisect import insort
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
@@ -38,6 +39,7 @@ PROGRAMS_PER_ROLE = 100
 PROFILE = "codecontests-plus"
 DATASET_KEY = "codecontests_plus_verified"
 DEFAULT_POLICY = "testcase_eval_task1_cot"
+DEFAULT_PROBLEM_SAMPLE_SEED = "codecontests-plus-verified-v1"
 COMPILER_PROFILES = {
     "CPP": ("cpp-gnu++17",),
     "PY2": ("python2",),
@@ -87,6 +89,12 @@ def _verified(row: Mapping[str, Any]) -> bool:
 
 def _problem_key(row: Mapping[str, Any]) -> str:
     return f"ccp:{row['source']}:{row['id']}"
+
+
+def _problem_sample_rank(row: Mapping[str, Any], seed: str) -> tuple[bytes, str]:
+    key = _problem_key(row)
+    digest = hashlib.sha256(f"{seed}\0{key}".encode("utf-8")).digest()
+    return digest, key
 
 
 def _problem_spec(row_index: int, row: Mapping[str, Any]) -> ProblemSpec:
@@ -230,12 +238,23 @@ def prepare_dataset(
     dataset_parquets: Sequence[str | Path] = (),
     problem_ids: Sequence[str] = (),
     smoke_problems: int | None = None,
+    sample_problems: int | None = None,
+    sample_seed: str = DEFAULT_PROBLEM_SAMPLE_SEED,
 ) -> dict[str, Any]:
     if smoke_problems is not None and smoke_problems < 1:
         raise ValueError("smoke_problems must be positive")
+    if sample_problems is not None and sample_problems < 1:
+        raise ValueError("sample_problems must be positive")
+    if sample_problems is not None and (smoke_problems is not None or problem_ids):
+        raise ValueError(
+            "sample_problems cannot be combined with smoke_problems or problem_ids"
+        )
+    if sample_problems is not None and not sample_seed:
+        raise ValueError("sample_seed must not be empty")
     wanted = {str(value) for value in problem_ids}
-    rows = []
-    row_indices = []
+    selected = []
+    sampled = []
+    verified_population = 0
     for row_index, value in enumerate(_load_dataset(cache_dir, dataset_parquets)):
         row = dict(value)
         if not _verified(row):
@@ -243,10 +262,26 @@ def prepare_dataset(
         display_id = f"{row['source']}:{row['id']}"
         if wanted and display_id not in wanted and _problem_key(row) not in wanted:
             continue
-        rows.append(row)
-        row_indices.append(row_index)
-        if smoke_problems is not None and not wanted and len(rows) >= smoke_problems:
+        verified_population += 1
+        if sample_problems is not None:
+            ranked_row = (_problem_sample_rank(row, sample_seed), row_index, row)
+            if len(sampled) < sample_problems or ranked_row[0] < sampled[-1][0]:
+                insort(sampled, ranked_row)
+                if len(sampled) > sample_problems:
+                    sampled.pop()
+            continue
+        selected.append((row_index, row))
+        if smoke_problems is not None and not wanted and len(selected) >= smoke_problems:
             break
+    if sample_problems is not None:
+        if sample_problems > verified_population:
+            raise ValueError(
+                f"sample_problems={sample_problems} exceeds the Verified population "
+                f"of {verified_population}"
+            )
+        selected = [(row_index, row) for _rank, row_index, row in sampled]
+    row_indices = [row_index for row_index, _row in selected]
+    rows = [row for _row_index, row in selected]
     if wanted:
         found = {f"{row['source']}:{row['id']}" for row in rows} | {
             _problem_key(row) for row in rows
@@ -295,6 +330,18 @@ def prepare_dataset(
             "output_judging": "published-checker",
         }
     )
+    if sample_problems is not None:
+        store.bind_manifest(
+            {
+                "problem_sampling": {
+                    "method": "sha256-minhash",
+                    "seed": sample_seed,
+                    "verified_population": verified_population,
+                    "sample_size": len(rows),
+                    "selected_problem_keys": [_problem_key(row) for row in rows],
+                }
+            }
+        )
     store.connection.executemany(
         "INSERT OR REPLACE INTO problems VALUES (?, ?, ?)",
         (

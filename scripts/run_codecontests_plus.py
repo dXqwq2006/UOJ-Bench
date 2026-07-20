@@ -34,6 +34,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=16)
     parser.add_argument("--problem-id", action="append", default=[])
     parser.add_argument("--smoke-problems", type=int)
+    parser.add_argument("--sample-problems", type=int)
+    parser.add_argument("--sample-seed", default="codecontests-plus-verified-v1")
     parser.add_argument("--dataset-cache")
     parser.add_argument("--dataset-parquet", type=Path, action="append", default=[])
     parser.add_argument("--max-generations-per-problem", type=int)
@@ -69,6 +71,8 @@ def main() -> None:
                     dataset_parquets=args.dataset_parquet,
                     problem_ids=args.problem_id,
                     smoke_problems=args.smoke_problems,
+                    sample_problems=args.sample_problems,
+                    sample_seed=args.sample_seed,
                 )
             )
         elif args.phase == "audit":

@@ -212,6 +212,13 @@ Verified thresholds, sample rule, selected row indices, compiler audit,
 evaluator fingerprint, and generation budget. Repeated `--dataset-parquet`
 arguments can pin downloaded `1x` shards by SHA-256.
 
+For a deterministic uniform subset, use `--sample-problems 500`. Selection is
+performed after the Verified filter by SHA-256 min-hash over each stable problem
+key with the fixed `codecontests-plus-verified-v1` seed. The method, seed,
+Verified population, sample size, and selected keys are stored in the manifest.
+Use `--sample-seed` only when intentionally defining a different benchmark
+subset.
+
 On H100, unprivileged namespaces are disabled. The deployed fallback uses
 `chroot`, UID/GID isolation, `no-new-privs`, `prlimit`, output caps, and wall
 timeouts, and its identity is included in the evaluator fingerprint. It is
