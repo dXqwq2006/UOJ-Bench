@@ -37,6 +37,8 @@ VERIFIED_THRESHOLD = 0.9
 GENERATIONS_PER_PROBLEM = 20
 PROGRAMS_PER_ROLE = 100
 PROFILE = "codecontests-plus"
+CHECKER_TIME_LIMIT_MS = 5000
+CHECKER_RETRY_TIME_LIMIT_MS = 30000
 DATASET_KEY = "codecontests_plus_verified"
 DEFAULT_POLICY = "testcase_eval_task1_cot"
 DEFAULT_PROBLEM_SAMPLE_SEED = "codecontests-plus-verified-v1"
@@ -1014,24 +1016,40 @@ def _execute_program(
                         "output.txt": str(value.get("stdout") or ""),
                         "answer.txt": test["oracle_output"],
                     },
-                    "timeLimitMs": 5000,
+                    "timeLimitMs": CHECKER_TIME_LIMIT_MS,
                     "memoryLimitMb": 512,
                 }
             )
+    checker_payload = {
+        "profile": PROFILE,
+        "lang": "cpp-gnu++17",
+        "code": _checker_source(program["checker"]),
+        "sourceName": "main.cpp",
+    }
     checker_values = (
-        _batch_results(
-            base_url,
-            {
-                "profile": PROFILE,
-                "lang": "cpp-gnu++17",
-                "code": _checker_source(program["checker"]),
-                "sourceName": "main.cpp",
-                "tests": checker_tests,
-            },
-        )
+        _batch_results(base_url, {**checker_payload, "tests": checker_tests})
         if checker_tests
         else {}
     )
+    timed_out = [
+        test
+        for test in checker_tests
+        if _normalize_result(checker_values.get(str(test["id"]), {}))
+        == "time_limit_exceeded"
+    ]
+    if timed_out:
+        checker_values.update(
+            _batch_results(
+                base_url,
+                {
+                    **checker_payload,
+                    "tests": [
+                        {**test, "timeLimitMs": CHECKER_RETRY_TIME_LIMIT_MS}
+                        for test in timed_out
+                    ],
+                },
+            )
+        )
     records = []
     for test in tests:
         value = by_id.get(str(test["generation_id"]))

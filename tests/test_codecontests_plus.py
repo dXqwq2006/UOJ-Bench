@@ -417,6 +417,71 @@ class CodeContestsPlusScoringTests(unittest.TestCase):
 
     @patch("utils.codecontests_plus._batch_results")
     @patch("utils.codecontests_plus._run_program")
+    def test_checker_timeout_gets_one_bounded_retry(self, run_program, checker):
+        run_program.return_value = {
+            "0": {"id": "0", "status": "exited", "stdout": "valid"},
+        }
+        timeout = {
+            "0": {
+                "id": "0",
+                "status": "Time Limit Exceeded",
+                "exitStatus": 9,
+            },
+        }
+        checker.side_effect = [
+            timeout,
+            {"0": {"id": "0", "status": "exited", "exitStatus": 0}},
+        ]
+
+        records = _execute_program(
+            "http://judge",
+            "policy",
+            {
+                "problem_id": PROBLEM_ID,
+                "submission_id": "s",
+                "submission_type": "right_submission",
+                "language": "CPP",
+                "checker": "checker",
+            },
+            [{"generation_id": 0, "test_input": "1", "oracle_output": "valid"}],
+        )
+
+        self.assertEqual(records[0][10], "accepted")
+        self.assertEqual(checker.call_count, 2)
+        self.assertEqual(checker.call_args_list[0].args[1]["tests"][0]["timeLimitMs"], 5000)
+        self.assertEqual(checker.call_args_list[1].args[1]["tests"][0]["timeLimitMs"], 30000)
+
+    @patch("utils.codecontests_plus._batch_results")
+    @patch("utils.codecontests_plus._run_program")
+    def test_persistent_checker_timeout_remains_fatal(self, run_program, checker):
+        run_program.return_value = {
+            "0": {"id": "0", "status": "exited", "stdout": "valid"},
+        }
+        checker.return_value = {
+            "0": {
+                "id": "0",
+                "status": "Time Limit Exceeded",
+                "exitStatus": 9,
+            },
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "checker failed"):
+            _execute_program(
+                "http://judge",
+                "policy",
+                {
+                    "problem_id": PROBLEM_ID,
+                    "submission_id": "s",
+                    "submission_type": "right_submission",
+                    "language": "CPP",
+                    "checker": "checker",
+                },
+                [{"generation_id": 0, "test_input": "1", "oracle_output": "valid"}],
+            )
+        self.assertEqual(checker.call_count, 2)
+
+    @patch("utils.codecontests_plus._batch_results")
+    @patch("utils.codecontests_plus._run_program")
     def test_checker_judge_failure_becomes_oracle_conflict(
         self, run_program, checker
     ):
