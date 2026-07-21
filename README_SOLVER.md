@@ -96,9 +96,35 @@ output items between agent rounds. Treat this as a distinct deployment when
 comparing or resuming runs; do not mix its records into a chat-completions
 result directory. Confirm the discounted rate in TATU's billing records.
 
+Gemini routing also honors `TATU_DEPLOYER`. For the Google caller, set
+`TATU_DEPLOYER=GOOGLE`; the adapter sends
+`gemini-3.1-pro-preview@GOOGLE` through the native `generateContent` endpoint
+and records the effective route in `request_config`.
+
 TATU generation POSTs are not retried inside the call adapter. This keeps one
 recorded model turn equal to one potentially billable request. The Agent runners
 retain upstream's outer-round exception and trial behavior.
+
+To fill the UOJ Hacking rollout queue while UOJ itself is unavailable, persist
+the first agent turn separately:
+
+```bash
+python -m scripts.run_hack_rollout_batch \
+  --split all \
+  --solver prompt \
+  --model gemini-3.1-pro-preview \
+  --workers 128 \
+  --dataset-dir dataset \
+  --result-dir /path/to/result
+```
+
+The runner never calls UOJ. It writes each raw response, parsed generator,
+provider-native transcript, usage, and non-secret request configuration before
+moving to the next sample, and `--resume` retries only missing or request-error
+records. `--seed-agent-result-dir` imports first turns from a compatible
+completed agent run. This is intentionally round one only: every later Hacking
+turn depends on the previous UOJ response and cannot be generated ahead without
+changing benchmark semantics.
 
 Set `GPT_OSS_BASE_URL` to route `gpt-oss-120b` to a local OpenAI-compatible
 server instead of OpenRouter. `GPT_OSS_API_KEY` is optional and defaults to

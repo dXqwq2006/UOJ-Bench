@@ -470,13 +470,17 @@ class CallLlmTests(unittest.TestCase):
         ]
         with patch.dict(
             os.environ,
-            {"TATU_API_KEY": "key", "TATU_BASE_URL": "https://tatu.test/v1beta/"},
+            {
+                "TATU_API_KEY": "key",
+                "TATU_BASE_URL": "https://tatu.test/v1beta/",
+                "TATU_DEPLOYER": "GOOGLE",
+            },
         ), patch("solution.llm.call_llm.requests.Session", return_value=context):
             result = call_llm.call_llm_full(history, "gemini-3.1-pro-preview")
 
         self.assertEqual(
             session.post.call_args.args[0],
-            "https://tatu.test/v1beta/models/gemini-3.1-pro-preview:generateContent",
+            "https://tatu.test/v1beta/models/gemini-3.1-pro-preview%40GOOGLE:generateContent",
         )
         payload = session.post.call_args.kwargs["json"]
         self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "system"}]})
@@ -486,6 +490,15 @@ class CallLlmTests(unittest.TestCase):
         self.assertEqual(message["content"], "public answer")
         self.assertEqual(message["reasoning_content"], "private thought")
         self.assertEqual(message["native_turn"]["parts"], new_parts)
+        self.assertEqual(
+            result["request_config"],
+            {
+                "request_model": "gemini-3.1-pro-preview@GOOGLE",
+                "deployer": "GOOGLE",
+                "max_output_tokens": 65536,
+                "temperature": None,
+            },
+        )
         self.assertEqual(
             result["usage"],
             {

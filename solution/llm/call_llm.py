@@ -501,6 +501,8 @@ def _call_anthropic(history, model, key, base, max_tokens, temperature):
 
 
 def _call_gemini(history, model, key, base, max_tokens, temperature):
+    deployer = os.environ.get("TATU_DEPLOYER", "").strip()
+    request_model = model if not deployer or "@" in model else f"{model}@{deployer}"
     messages, system = _gemini_messages(history)
     generation_config = {"maxOutputTokens": max_tokens}
     if temperature is not None:
@@ -514,7 +516,7 @@ def _call_gemini(history, model, key, base, max_tokens, temperature):
             origin = origin.removesuffix(suffix)
             break
     raw = _post(
-        f"{origin}/v1beta/models/{quote(model, safe='')}:generateContent",
+        f"{origin}/v1beta/models/{quote(request_model, safe='')}:generateContent",
         {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         payload,
         key,
@@ -545,7 +547,12 @@ def _call_gemini(history, model, key, base, max_tokens, temperature):
         {"role": "model", "parts": copy.deepcopy(parts)},
         candidate.get("finishReason"),
         raw.get("usageMetadata"),
-        {"max_output_tokens": max_tokens, "temperature": temperature},
+        {
+            "request_model": request_model,
+            "deployer": deployer or None,
+            "max_output_tokens": max_tokens,
+            "temperature": temperature,
+        },
     )
 
 
