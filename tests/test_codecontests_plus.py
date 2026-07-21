@@ -12,6 +12,7 @@ from utils.codecontests_plus import (
     _selected_records,
     _snapshot_stats,
     _validate_problem,
+    audit_programs,
     execute_pending,
     export_jsonl,
     generation_jobs,
@@ -252,6 +253,33 @@ class CodeContestsPlusDatasetTests(unittest.TestCase):
                 store.connection.commit()
 
                 require_compile_audit(store)
+
+    @patch(
+        "utils.codecontests_plus.preflight",
+        return_value={
+            "profiles": {"codecontests-plus": {"fingerprint": "a" * 64}}
+        },
+    )
+    def test_completed_compile_audit_resume_is_a_noop(self, _preflight):
+        expected = {"scheduled": 4, "complete": 4, "compile_error": 0}
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.codecontests_plus._load_dataset", return_value=[fixture_row()]
+            ):
+                prepare_dataset(store)
+                audit_all_programs(store)
+                store.bind_manifest({"ccplus_compile_audit": expected})
+
+                summary = audit_programs(
+                    store,
+                    base_url="http://judge",
+                    workers=1,
+                )
+
+        self.assertEqual(
+            {key: summary[key] for key in expected},
+            expected,
+        )
 
     @patch("utils.codecontests_plus._batch_results")
     def test_published_validator_is_authoritative(self, batch):
