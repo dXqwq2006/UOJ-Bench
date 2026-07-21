@@ -9,6 +9,7 @@ from utils.codecontests_plus import (
     COMPILER_PROFILES,
     RunStore,
     _batch_results,
+    _checker_source,
     _execute_program,
     _selected_records,
     _snapshot_stats,
@@ -110,6 +111,14 @@ def audit_all_programs(store):
 
 
 class CodeContestsPlusDatasetTests(unittest.TestCase):
+    def test_legacy_checker_read_long_bounds_are_signed(self):
+        source = 'long long x = inf.readLong(3, 999999, "x");'
+
+        self.assertEqual(
+            _checker_source(source),
+            'long long x = inf.readLong(3LL, 999999LL, "x");',
+        )
+
     @patch("utils.codecontests_plus._request_json")
     def test_oversized_lightcp_batch_is_split(self, request):
         for error in (
