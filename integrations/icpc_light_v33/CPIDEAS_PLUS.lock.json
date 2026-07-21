@@ -1,0 +1,19 @@
+{
+  "repository": "https://github.com/dXqwq2006/CPIdeas-Plus.git",
+  "commit": "778c619799affe3c52ecd23e2984ce7d9545fed5",
+  "dataset_api_revision": "cpideas-program-dataset-v1",
+  "files_sha256": {
+    "cpideas_plus/__init__.py": "32a795a0ae4c87634ce9d44bc6b8cbd04a602938f75e34ad191d838cac10643e",
+    "cpideas_plus/evaluation/__init__.py": "ded3d7d34f29328d95359f30b768f9d0f01a5f1086f4e89d49f431a8d6db87fa",
+    "cpideas_plus/evaluation/dataset.py": "677b13fb647cf33f10cc04ccb678f71fda8d4db09f16a8d688cc4b8e81f2945c",
+    "cpideas_plus/evaluation/election.py": "061208362fd503c484e65a686f1934109b77fb9cd3a95a989b0b3086c328814d",
+    "cpideas_plus/evaluation/execution.py": "154aade9b70d02a45234f6845d09004d4cc0fcfe6d653310c067c2cd25aaa491",
+    "cpideas_plus/evaluation/local_executor.py": "9ebebc620adbd2604d4dc09add65d9bb877a0c08776974dbd5d728bf95ae6bae",
+    "cpideas_plus/evaluation/local_runtime.py": "254ce08a1915ab60a36feb141f3e21512771b32a5d8f2b8a03708875fd1df5aa",
+    "cpideas_plus/evaluation/native_package.py": "7f17df078c9edc9c9be2fb37fb10f2a37a3698abf20183fcc0b5995b33bfe0d3",
+    "cpideas_plus/evaluation/package_adapter.py": "18e0ad27549d2251d14e2c65d859792dddbf6c9c5db314589712097009ea36e1",
+    "cpideas_plus/evaluation/sandbox.py": "073dced68d5d99db63ae76e1f5a7d52c9e0f7e54046e0b1835867bdecc2ef767",
+    "cpideas_plus/evaluation/spec.py": "756348f86af1c2ec5c4ef1fa785f052a3088654d0673e2982d78b1e347f7ecb4",
+    "cpideas_plus/evaluation/submission.py": "cc31219d0a3a6b3c7f36108779549540b3fe9b4a98becd8dd8cd8f206393daa6"
+  }
+}

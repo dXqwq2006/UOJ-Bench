@@ -27,8 +27,13 @@ PLACEHOLDER_TOKEN = "skill-eval-placeholder-token"
 UPSTREAM_BASE_URL = "https://maas.tatucloud.com/deployer/coding_tatu/v1"
 RELAY_URL = "http://credential-relay:8080/v1"
 DEFAULT_RELAY_CONTAINER = "icpc-light-v33-relay"
+LIGHTCPVERIFIER_URL = "http://lightcpverifier:8081"
+LIGHTCPVERIFIER_BUILD_ID = (
+    "sha256:134bd322502f762dee2c2da5abf0b9d6c64e3b3d4055fde8ff4eb250c46db603"
+)
+CPIDEAS_PLUS_COMMIT = "778c619799affe3c52ecd23e2984ce7d9545fed5"
 BASE_AGENT_IMAGE_ID = "sha256:d922d6dfe1e11d5a7570b1108abcf18bfe2fec59703b54440363ae8eac002169"
-XHIGH_WRAPPER_SHA256 = "938886b301bea9c5a2fd1f68500daad408dda598c1e055883a69e30f9fb0020f"
+XHIGH_WRAPPER_SHA256 = "7d517ae8652a3dd176dd6a597f37678f8da2c0faeddbec0fea113c1f28bbaf65"
 MAX_DOCKER_OUTPUT_BYTES = 16 * 1024 * 1024
 IMAGE_ID_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 OBJECT_ID_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -111,6 +116,7 @@ def _image(image_id: str) -> dict[str, Any]:
         or labels.get("org.cpideas.skill-eval.reasoning-effort") != REASONING_EFFORT
         or labels.get("org.cpideas.skill-eval.base-agent-image-id") != BASE_AGENT_IMAGE_ID
         or labels.get("org.cpideas.skill-eval.codex-wrapper-sha256") != XHIGH_WRAPPER_SHA256
+        or labels.get("org.cpideas.skill-eval.cpideas-plus-commit") != CPIDEAS_PLUS_COMMIT
         or labels.get("org.cpideas.skill-eval.skill-bundle-version") != "3.3.0"
     ):
         raise SchedulerError("agent image identity or xhigh contract is invalid")
@@ -145,6 +151,46 @@ def _relay(container: str, image_id: str) -> dict[str, Any]:
     return value
 
 
+def _lightcpverifier(container: str, image_id: str) -> dict[str, Any]:
+    if SAFE_NAME_RE.fullmatch(container) is None:
+        raise SchedulerError("LightCPVerifier container name is unsafe")
+    if IMAGE_ID_RE.fullmatch(image_id) is None:
+        raise SchedulerError("LightCPVerifier image must be an immutable sha256 ID")
+    value = _json_object(
+        ["inspect", container, "--format", "{{json .}}"],
+        "LightCPVerifier inspect",
+    )
+    config = value.get("Config")
+    host = value.get("HostConfig")
+    state = value.get("State")
+    labels = config.get("Labels") if isinstance(config, dict) else None
+    environment = {}
+    if isinstance(config, dict) and isinstance(config.get("Env"), list):
+        environment = dict(
+            item.split("=", 1)
+            for item in config["Env"]
+            if isinstance(item, str) and "=" in item
+        )
+    if (
+        value.get("Image") != image_id
+        or value.get("Mounts") != []
+        or not isinstance(config, dict)
+        or config.get("Volumes") not in (None, {})
+        or not isinstance(labels, dict)
+        or labels.get("org.cpideas.lightcpverifier.contract") != "zero-mount-v3"
+        or labels.get("org.cpideas.lightcpverifier.build-id")
+        != LIGHTCPVERIFIER_BUILD_ID
+        or environment.get("LIGHTCPVERIFIER_BUILD_ID") != LIGHTCPVERIFIER_BUILD_ID
+        or environment.get("LIGHTCPVERIFIER_IMAGE_ID") != image_id
+        or not isinstance(host, dict)
+        or host.get("Mounts") not in (None, [])
+        or not isinstance(state, dict)
+        or state.get("Running") is not True
+    ):
+        raise SchedulerError("dedicated LightCPVerifier attestation failed")
+    return value
+
+
 def _container_create_argv(
     *,
     name: str,
@@ -153,7 +199,7 @@ def _container_create_argv(
     user: str,
     task: str,
 ) -> list[str]:
-    return [
+    result = [
         "create",
         "--name",
         name,
@@ -180,7 +226,7 @@ def _container_create_argv(
         "--workdir",
         "/work/cell",
         "--env",
-        "PYTHONPATH=/opt",
+        "PYTHONPATH=/opt:/opt/cpideas",
         "--env",
         "HOME=/work/cell/home",
         "--env",
@@ -205,6 +251,13 @@ def _container_create_argv(
         "--workspace",
         "/work/cell",
     ]
+    if task == "test_package":
+        entrypoint = result.index("--entrypoint")
+        result[entrypoint:entrypoint] = [
+            "--env",
+            f"ICPC_LIGHT_LIGHTCPVERIFIER_URL={LIGHTCPVERIFIER_URL}",
+        ]
+    return result
 
 
 def _job_subnet(suffix: str) -> str:
@@ -424,6 +477,8 @@ def run(
     agent_image_id: str,
     relay_container: str,
     relay_image_id: str,
+    lightcpverifier_container: str | None,
+    lightcpverifier_image_id: str | None,
     integration_manifest_sha256: str,
     timeout: float,
 ) -> dict[str, Any]:
@@ -445,6 +500,30 @@ def run(
     if not isinstance(relay_id, str) or OBJECT_ID_RE.fullmatch(relay_id) is None:
         raise SchedulerError("credential relay has a non-canonical container ID")
 
+    lightcpverifier_id = ""
+    if task == "test_package":
+        if lightcpverifier_container is None or lightcpverifier_image_id is None:
+            raise SchedulerError(
+                "test_package requires an attested LightCPVerifier container"
+            )
+        service = _lightcpverifier(
+            lightcpverifier_container, lightcpverifier_image_id
+        )
+        candidate_id = service.get("Id")
+        if (
+            not isinstance(candidate_id, str)
+            or OBJECT_ID_RE.fullmatch(candidate_id) is None
+        ):
+            raise SchedulerError("LightCPVerifier has a non-canonical container ID")
+        lightcpverifier_id = candidate_id
+    elif (
+        lightcpverifier_container is not None
+        or lightcpverifier_image_id is not None
+    ):
+        raise SchedulerError(
+            "LightCPVerifier may only be attached to test_package jobs"
+        )
+
     suffix = secrets.token_hex(10)
     network_name = f"icpc-light-v33-net-{suffix}"
     network_subnet = _job_subnet(suffix)
@@ -452,6 +531,7 @@ def run(
     network_id = ""
     container_id = ""
     connected = False
+    lightcpverifier_connected = False
     started_at = _now()
     package = _stage_agent_package(integration_root, workspace)
     try:
@@ -483,6 +563,18 @@ def run(
             ]
         )
         connected = True
+        if lightcpverifier_id:
+            _docker(
+                [
+                    "network",
+                    "connect",
+                    "--alias",
+                    "lightcpverifier",
+                    network_id,
+                    lightcpverifier_id,
+                ]
+            )
+            lightcpverifier_connected = True
         user = f"{metadata.st_uid}:{metadata.st_gid}"
         created = _docker(
             _container_create_argv(
@@ -545,6 +637,14 @@ def run(
             "mounts": [],
             "workspace_transfer": "docker-cp",
             "integration_manifest_sha256": manifest_sha256,
+            **(
+                {
+                    "lightcpverifier_container_id": lightcpverifier_id,
+                    "lightcpverifier_image_id": lightcpverifier_image_id,
+                }
+                if lightcpverifier_id
+                else {}
+            ),
             **exported,
         }
     finally:
@@ -552,6 +652,17 @@ def run(
             _docker(["container", "rm", "--force", container_id], check=False)
         if connected and network_id:
             _docker(["network", "disconnect", "--force", network_id, relay_id], check=False)
+        if lightcpverifier_connected and network_id:
+            _docker(
+                [
+                    "network",
+                    "disconnect",
+                    "--force",
+                    network_id,
+                    lightcpverifier_id,
+                ],
+                check=False,
+            )
         if network_id:
             _docker(["network", "rm", network_id], check=False)
         shutil.rmtree(package.parent, ignore_errors=True)
@@ -574,6 +685,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--agent-image-id", required=True)
     parser.add_argument("--relay-container", default=DEFAULT_RELAY_CONTAINER)
     parser.add_argument("--relay-image-id", required=True)
+    parser.add_argument("--lightcpverifier-container")
+    parser.add_argument("--lightcpverifier-image-id")
     parser.add_argument("--integration-manifest-sha256", required=True)
     parser.add_argument("--timeout-seconds", type=float, default=21_000)
     args = parser.parse_args(argv)
@@ -589,6 +702,8 @@ def main(argv: list[str] | None = None) -> int:
             agent_image_id=args.agent_image_id,
             relay_container=args.relay_container,
             relay_image_id=args.relay_image_id,
+            lightcpverifier_container=args.lightcpverifier_container,
+            lightcpverifier_image_id=args.lightcpverifier_image_id,
             integration_manifest_sha256=args.integration_manifest_sha256,
             timeout=args.timeout_seconds,
         )

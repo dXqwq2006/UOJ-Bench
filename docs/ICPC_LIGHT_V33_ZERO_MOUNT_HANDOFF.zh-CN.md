@@ -69,6 +69,16 @@ v3.3 agent image 派生，只替换冻结的 Codex provider gate，并把实际 
 `xhigh`。仓库中的 vendored 副本已经把上游 `ultra` 指令、检查、verifier、fixture 与
 receipt contract 全量端口到 `xhigh`，并在 lock 的 `publication_ports` 中记录；正式
 receipt、bridge request、Codex argv 和派生 image label 必须全部是 `xhigh`。
+镜像必须从 `integrations/icpc_light_v33/` 作为 build context 构建；它会把冻结的
+provider gate 同时安装到 `/opt/skill-eval/bin/codex` 和
+`/usr/local/bin/codex`，并把后者原始 CLI 移到 `codex-real`，因此外层 agent 与内部
+blind lanes 都只能访问同一个 credential relay。
+
+`test_package` 还必须给 scheduler 传入专用 LightCPVerifier 的容器名和不可变 image ID。
+scheduler 校验 zero-mount v3 标签、build/image identity 和运行状态，再把该容器以
+`lightcpverifier` alias 临时接入单题 internal network；非 package 任务拒绝这个附件。
+agent 镜像内只包含 `CPIDEAS_PLUS.lock.json` 固定的 commit `778c619` Program x Dataset
+客户端，不包含 benchmark 的 validator、checker、accepted/wrong source 或 credential。
 
 ## 两阶段 Hacking
 

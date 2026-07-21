@@ -17,7 +17,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
 
 
-REAL_CODEX = "/usr/local/bin/codex"
+REAL_CODEX = "/usr/local/bin/codex-real"
 PLACEHOLDER_API_TOKEN = "skill-eval-placeholder-token"
 INTERNAL_RELAY_BASE_URL = "http://credential-relay:8080/v1"
 EXACT_TATU_CODING_BASE_URL = (

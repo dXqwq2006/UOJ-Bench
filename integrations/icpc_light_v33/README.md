@@ -27,6 +27,14 @@ vendored model-effort instruction, executable check, verifier, fixture, and
 receipt contract from upstream `ultra` to the benchmark-wide `xhigh` setting.
 Both adaptations are recorded explicitly, while the regenerated vendored
 manifest and tree hash pin the executable copy.
+
+Test Package jobs also vendor the exact CPIdeas Plus Program x Dataset client
+from commit `778c619`; [`CPIDEAS_PLUS.lock.json`](CPIDEAS_PLUS.lock.json) binds
+every shipped module. Build `docker/agent-xhigh.Dockerfile` with this integration
+directory as the Docker build context. The image installs the provider gate at
+both Codex executable locations so nested blind lanes cannot bypass the relay.
+The zero-mount scheduler attaches an attested LightCPVerifier container only to
+Test Package job networks and records its immutable image identity.
 [`MANIFEST.sha256`](MANIFEST.sha256) pins every other file in this integration;
 verify it from this directory with `sha256sum -c MANIFEST.sha256` on Linux
 (`shasum -a 256 -c MANIFEST.sha256` on macOS).

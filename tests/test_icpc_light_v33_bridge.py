@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import runpy
 import stat
 import sys
 import tempfile
@@ -16,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 BRIDGE_SRC = ROOT / "integrations" / "icpc_light_v33" / "src"
 sys.path.insert(0, str(BRIDGE_SRC))
+CODEX_WRAPPER = runpy.run_path(
+    str(ROOT / "integrations" / "icpc_light_v33" / "docker" / "codex_wrapper.py"),
+    run_name="icpc_light_v33_codex_wrapper_test",
+)
 
 import solution
 
@@ -593,7 +598,57 @@ class BridgeRuntimeTests(unittest.TestCase):
         self.assertNotIn("--tmpfs", argv)
         self.assertIn("SKILL_EVAL_REASONING_EFFORT=xhigh", argv)
         self.assertIn("OPENAI_API_KEY=skill-eval-placeholder-token", argv)
+        self.assertNotIn(
+            "ICPC_LIGHT_LIGHTCPVERIFIER_URL=http://lightcpverifier:8081", argv
+        )
         self.assertEqual(argv[argv.index("--entrypoint") + 2], image)
+
+        package_argv = _container_create_argv(
+            name="icpc-light-v33-agent-package",
+            network_id="2" * 64,
+            image_id=image,
+            user="1000:1000",
+            task="test_package",
+        )
+        self.assertIn(
+            "ICPC_LIGHT_LIGHTCPVERIFIER_URL=http://lightcpverifier:8081",
+            package_argv,
+        )
+
+    def test_nested_codex_invocations_are_bound_to_the_relay(self) -> None:
+        arguments = [
+            "exec",
+            "--json",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "--model",
+            "gpt-5.6-sol",
+            "-c",
+            'model_reasoning_effort="xhigh"',
+            "--sandbox",
+            "workspace-write",
+            "--cd",
+            "/work/cell/blind-solves/icpc-light/neutral-01/workspace",
+            "-",
+        ]
+        environment = {
+            "OPENAI_API_KEY": "skill-eval-placeholder-token",
+            "CODEX_API_KEY": "skill-eval-placeholder-token",
+            "OPENAI_BASE_URL": "http://credential-relay:8080/v1",
+            "SKILL_EVAL_UPSTREAM_BASE_URL": (
+                "https://maas.tatucloud.com/deployer/coding_tatu/v1"
+            ),
+        }
+        wrapped = CODEX_WRAPPER["wrapped_argv"](arguments, environment)
+        self.assertEqual(wrapped[0], "/usr/local/bin/codex-real")
+        self.assertIn('model_provider="noc"', wrapped)
+        self.assertIn(
+            'model_providers.noc.base_url="http://credential-relay:8080/v1"',
+            wrapped,
+        )
+        self.assertEqual(wrapped[-1], "-")
 
     def test_zero_mount_job_subnets_are_small_and_deterministic(self) -> None:
         self.assertEqual(_job_subnet("0" * 20), "10.240.0.0/29")
@@ -636,6 +691,26 @@ class BridgeRuntimeTests(unittest.TestCase):
             lock["source_release_sha256"],
             "4bd3b6ff8cd89eff49fb7f7417c207b43d2a966a7edd4613dfc40a3aa37683ca",
         )
+        cpideas_root = integration / "vendor" / "cpideas_plus_778c619"
+        cpideas_lock = json.loads(
+            (integration / "CPIDEAS_PLUS.lock.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            cpideas_lock["commit"],
+            "778c619799affe3c52ecd23e2984ce7d9545fed5",
+        )
+        actual_cpideas_files = {
+            path.relative_to(cpideas_root).as_posix()
+            for path in cpideas_root.rglob("*")
+            if path.is_file()
+        }
+        self.assertEqual(actual_cpideas_files, set(cpideas_lock["files_sha256"]))
+        for relative, expected_sha256 in cpideas_lock["files_sha256"].items():
+            self.assertEqual(
+                hashlib.sha256((cpideas_root / relative).read_bytes()).hexdigest(),
+                expected_sha256,
+            )
+
         self.assertEqual(
             lock["publication_redactions"],
             [
