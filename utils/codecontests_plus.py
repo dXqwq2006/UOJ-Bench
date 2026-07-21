@@ -712,6 +712,18 @@ def _limits(metadata: Mapping[str, Any]) -> tuple[int, int]:
     )
 
 
+def _checker_source(source: str) -> str:
+    # ponytail: disambiguate legacy signed readLong calls with modern testlib.
+    return re.sub(
+        r"(\.readLong\(\s*)(-?\d+)(\s*,\s*)(-?\d+)(\s*,)",
+        lambda match: (
+            f"{match.group(1)}{match.group(2)}LL"
+            f"{match.group(3)}{match.group(4)}LL{match.group(5)}"
+        ),
+        source,
+    )
+
+
 def _batch_results(base_url: str, payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
     tests = payload.get("tests")
     try:
@@ -1012,7 +1024,7 @@ def _execute_program(
             {
                 "profile": PROFILE,
                 "lang": "cpp-gnu++17",
-                "code": program["checker"],
+                "code": _checker_source(program["checker"]),
                 "sourceName": "main.cpp",
                 "tests": checker_tests,
             },
