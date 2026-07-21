@@ -241,7 +241,7 @@ class RunStore:
                 record["problem_id"],
                 record["submission_id"],
                 record["generation_id"],
-                record["prompt"],
+                _generation_prompt_text(record["prompt"]),
                 record["raw_text"],
                 record["candidate"],
                 record["candidate_format"],
@@ -257,6 +257,23 @@ class RunStore:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _generation_prompt_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    try:
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            "generation prompt must be text or a JSON-compatible value"
+        ) from exc
 
 
 def _load_dataset(

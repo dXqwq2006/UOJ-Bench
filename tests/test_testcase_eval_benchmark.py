@@ -160,6 +160,25 @@ class StoreAndScoreTests(unittest.TestCase):
                 )
                 self.assertEqual([job.generation_id for job in remaining], [1])
 
+    def test_structured_prompt_is_persisted_as_canonical_json(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store:
+                record = generation_record(1, "", 0)
+                record["prompt"] = {
+                    "task": "fault_coverage",
+                    "input": {"problem_id": "2000A", "metadata": {"z": 2, "a": 1}},
+                }
+                store.save_generation(record)
+                prompt = store.connection.execute(
+                    "SELECT prompt FROM generations"
+                ).fetchone()[0]
+
+        self.assertEqual(
+            prompt,
+            '{"input":{"metadata":{"a":1,"z":2},"problem_id":"2000A"},'
+            '"task":"fault_coverage"}',
+        )
+
     def test_jobs_discover_new_policy_from_solver_capabilities(self):
         class PaperSolver:
             capabilities = SolverCapabilities(
