@@ -160,6 +160,8 @@ def _preflight(
 
 
 def _run_docker(args: argparse.Namespace) -> None:
+    from utils.testcase_eval_executor import evaluation_owner
+
     dockerfile = ROOT / "docker" / "testcase_eval.Dockerfile"
     subprocess.run(
         [
@@ -206,6 +208,8 @@ def _run_docker(args: argparse.Namespace) -> None:
         "/workspace",
         "--env",
         "PYTHONDONTWRITEBYTECODE=1",
+        "--env",
+        f"UOJ_BENCH_EVALUATION_OWNER={evaluation_owner()}",
         args.image,
         "python3",
         "-m",

@@ -26,7 +26,7 @@ from utils.testcase_eval_benchmark import (
     _usage_numbers,
     effective_model_request,
 )
-from utils.testcase_eval_executor import materialize_generations
+from utils.testcase_eval_executor import evaluation_owner, materialize_generations
 from utils.testcase_eval_lightcp import _request_json
 
 
@@ -597,7 +597,9 @@ def audit_programs(
     _create_ccplus_schema(store)
     health = preflight(base_url)
     backend = _backend_identity(health)
-    store.bind_manifest({"judge_backend": backend})
+    store.bind_manifest(
+        {"judge_backend": backend, "evaluation_owner": evaluation_owner()}
+    )
     rows = list(
         store.connection.execute(
             """
@@ -1153,7 +1155,9 @@ def run_judge(
 ) -> dict[str, Any]:
     health = preflight(base_url)
     backend = _backend_identity(health)
-    store.bind_manifest({"judge_backend": backend})
+    store.bind_manifest(
+        {"judge_backend": backend, "evaluation_owner": evaluation_owner()}
+    )
     require_compile_audit(store)
     materialization = materialize_generations(store.path, workers)
     validation = validate_candidates(store, base_url=base_url, workers=workers)
