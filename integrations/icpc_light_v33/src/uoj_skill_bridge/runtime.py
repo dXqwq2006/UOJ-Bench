@@ -14,7 +14,8 @@ import ast
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import secrets
 import shutil
 import signal
@@ -259,7 +260,13 @@ def _validate_request(value: Any) -> dict[str, Any]:
     if value.get("schema_version") != 1:
         raise BridgeContractError("request schema_version must be 1")
     task = value.get("task")
-    if task not in {"generation", "hacking", "fault_coverage", "fault_exposure"}:
+    if task not in {
+        "generation",
+        "hacking",
+        "fault_coverage",
+        "fault_exposure",
+        "test_package",
+    }:
         raise BridgeContractError("request task is unsupported")
     if value.get("model") != MODEL or value.get("reasoning_effort") != REASONING_EFFORT:
         raise BridgeContractError("request changed the frozen model or reasoning effort")
@@ -707,7 +714,88 @@ def _regular_candidate(path: Path, maximum: int, label: str) -> str:
     return text
 
 
-def _candidate(workspace: Path, task: str, maximum: int) -> dict[str, str]:
+def _test_package_candidate(workspace: Path, maximum: int) -> dict[str, Any]:
+    audit_root = workspace / "audit"
+    package_root = workspace / "package"
+    tests_root = package_root / "tests"
+    for path, label in (
+        (audit_root, "audit"),
+        (package_root, "package"),
+        (tests_root, "package/tests"),
+    ):
+        metadata = path.lstat()
+        if path.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+            raise BridgeContractError(f"{label} is not a safe directory")
+    readiness = _regular_candidate(
+        workspace / "audit" / "readiness.md", maximum, "audit/readiness.md"
+    )
+    if re.search(r"(?m)^verdict:\s*go\s*$", readiness) is None:
+        raise BridgeContractError("ICPC Light readiness verdict is not go")
+    plan_path = workspace / "audit" / "regression-plan.json"
+    plan = _load_json_file(
+        plan_path, label="audit/regression-plan.json", maximum=maximum
+    )
+    release = plan.get("release_tests") if isinstance(plan, Mapping) else None
+    if not isinstance(release, list) or not 1 <= len(release) <= 50:
+        raise BridgeContractError("release_tests must contain 1 to 50 items")
+
+    actual = set()
+    for path in tests_root.rglob("*"):
+        metadata = path.lstat()
+        if stat.S_ISLNK(metadata.st_mode):
+            raise BridgeContractError("package/tests contains a symlink")
+        if stat.S_ISREG(metadata.st_mode) and path.suffix == ".in":
+            actual.add(path.relative_to(workspace).as_posix())
+        elif not stat.S_ISREG(metadata.st_mode) and not stat.S_ISDIR(metadata.st_mode):
+            raise BridgeContractError("package/tests contains an unsafe artifact")
+
+    tests = []
+    declared = []
+    for index, item in enumerate(release):
+        raw = item.get("input") if isinstance(item, Mapping) else None
+        if not isinstance(raw, str):
+            raise BridgeContractError(f"release_tests[{index}].input is invalid")
+        relative = PurePosixPath(raw)
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or relative.parts[:2] != ("package", "tests")
+            or relative.suffix != ".in"
+        ):
+            raise BridgeContractError(f"release_tests[{index}] escapes package/tests")
+        normalized = relative.as_posix()
+        if normalized in declared:
+            raise BridgeContractError("release_tests contains a duplicate input")
+        declared.append(normalized)
+        tests.append(
+            {
+                "path": normalized,
+                "content": _regular_candidate(
+                    workspace.joinpath(*relative.parts),
+                    maximum,
+                    normalized,
+                ),
+            }
+        )
+    if set(declared) != actual:
+        raise BridgeContractError(
+            "release_tests must enumerate every package/tests .in exactly once"
+        )
+    candidate = {
+        "kind": "test_package",
+        "tests": tests,
+        "artifact": {
+            "readiness": "go",
+            "readiness_sha256": _sha256_file(workspace / "audit" / "readiness.md"),
+            "regression_plan_sha256": _sha256_file(plan_path),
+        },
+    }
+    if len(_canonical_bytes(candidate)) > maximum:
+        raise BridgeContractError(f"test package exceeds {maximum} bytes")
+    return candidate
+
+
+def _candidate(workspace: Path, task: str, maximum: int) -> dict[str, Any]:
     output = workspace / "output"
     if output.is_symlink() or not output.is_dir():
         raise BridgeContractError("agent replaced the output directory")
@@ -727,6 +815,10 @@ def _candidate(workspace: Path, task: str, maximum: int) -> dict[str, str]:
             "kind": "solution",
             "content": _regular_candidate(output / "main.cpp", maximum, "main.cpp"),
         }
+    if task == "test_package":
+        if files:
+            raise BridgeContractError("test_package must keep output/ empty")
+        return _test_package_candidate(workspace, maximum)
     choices = [name for name in ("candidate.in", "generator.py") if name in files]
     if len(choices) != 1 or files != choices:
         raise BridgeContractError(
@@ -766,7 +858,12 @@ def execute_request(request_value: Any) -> dict[str, Any]:
         if _tree_sha256(workspace / "skills")[0] != copied_skills_sha:
             raise BridgeContractError("agent modified the copied skill bundle")
         candidate = _candidate(workspace, request["task"], config.max_candidate_bytes)
-        candidate_sha = _sha256_bytes(candidate["content"].encode("utf-8"))
+        candidate_bytes = (
+            _canonical_bytes(candidate)
+            if request["task"] == "test_package"
+            else candidate["content"].encode("utf-8")
+        )
+        candidate_sha = _sha256_bytes(candidate_bytes)
         identity = {
             "schema_version": 1,
             "profile": config.profile,
@@ -814,7 +911,8 @@ def execute_request(request_value: Any) -> dict[str, Any]:
                 "kind": candidate["kind"],
                 "format": candidate.get("format"),
                 "sha256": candidate_sha,
-                "bytes": len(candidate["content"].encode("utf-8")),
+                "bytes": len(candidate_bytes),
+                "test_count": len(candidate.get("tests", [])),
             },
         }
         receipt_sha = _sha256_bytes(_canonical_bytes(receipt))

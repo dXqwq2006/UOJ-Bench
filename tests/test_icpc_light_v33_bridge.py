@@ -26,6 +26,7 @@ from solution.api import (
     GenerationInput,
     HackingInput,
     TestCaseFormat,
+    TestPackageInput,
     require_solver_support,
 )
 from solution.icpc_light_v33_bridge import solver as bridge_solver
@@ -37,6 +38,7 @@ from solution.icpc_light_v33_bridge.solver import (
 from uoj_skill_bridge.runtime import (
     BridgeContractError,
     CONFIG_ENV,
+    _test_package_candidate,
     _tree_sha256,
     execute_request,
 )
@@ -97,6 +99,13 @@ def bind_fake_response(
     bound.setdefault("transcript", [])
     bound.setdefault("usage", {})
     candidate = response["candidate"]
+    candidate_bytes = (
+        json.dumps(
+            candidate, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+        if candidate.get("kind") == "test_package"
+        else candidate["content"].encode("utf-8")
+    )
     request_bytes = json.dumps(
         request,
         ensure_ascii=False,
@@ -118,9 +127,7 @@ def bind_fake_response(
         "skill_bytes": 1,
         "bridge_config_sha256": config_sha256,
         "agent_command": [{"index": 0, "value": "fake-bridge"}],
-        "candidate_sha256": hashlib.sha256(
-            candidate["content"].encode("utf-8")
-        ).hexdigest(),
+        "candidate_sha256": hashlib.sha256(candidate_bytes).hexdigest(),
     }
     signature_value = {
         key: bound["pipeline_identity"][key]
@@ -174,6 +181,16 @@ def fake_task_agent(root: Path) -> Path:
             output = args.workspace / "output"
             if args.task == "generation":
                 (output / "main.cpp").write_text("int main() {{ return 0; }}\\n")
+            elif args.task == "test_package":
+                audit = args.workspace / "audit"
+                tests = args.workspace / "package" / "tests"
+                audit.mkdir()
+                tests.mkdir(parents=True)
+                (audit / "readiness.md").write_text("verdict: go\\n")
+                (audit / "regression-plan.json").write_text(json.dumps({{
+                    "release_tests": [{{"input": "package/tests/01.in"}}]
+                }}))
+                (tests / "01.in").write_text("2 3\\n")
             else:
                 (output / "candidate.in").write_text("2 3\\n")
             result = {{
@@ -424,6 +441,61 @@ class SolverAdapterTests(unittest.TestCase):
         self.assertEqual(turn.candidate.content, raw_input)
         self.assertEqual(turn.candidate.format, TestCaseFormat.RAW_INPUT)
 
+    def test_package_exposes_only_statement_and_preserves_declared_order(self) -> None:
+        response = {
+            "schema_version": 1,
+            "status": "completed",
+            "candidate": {
+                "kind": "test_package",
+                "tests": [
+                    {"path": "package/tests/02.in", "content": "second\n"},
+                    {"path": "package/tests/01.in", "content": "first\n"},
+                ],
+                "artifact": {"readiness": "go"},
+            },
+            "transcript": [],
+            "usage": {"total_tokens": 3},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, config_sha256 = fake_adapter_config(root)
+            expected_request = {
+                "schema_version": 1,
+                "task": "test_package",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "xhigh",
+                "input": {
+                    "problem_id": "p",
+                    "problem_statement": "PUBLIC STATEMENT",
+                    "metadata": {},
+                },
+            }
+            bridge = fake_bridge(
+                root, bind_fake_response(response, config_sha256, expected_request)
+            )
+            with patch.dict(
+                os.environ,
+                {BRIDGE_ENV: str(bridge), BRIDGE_CONFIG_ENV: str(config)},
+            ):
+                solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
+                require_solver_support(solver, "test_package")
+                session = solver.start_test_package(
+                    TestPackageInput(
+                        "p", "PUBLIC STATEMENT", {"accepted_source": "SECRET"}
+                    )
+                )
+                self.assertEqual(session.initial_request, expected_request)
+                turn = session.next()
+
+        self.assertEqual(
+            [test.content for test in turn.candidate.tests],
+            ["second\n", "first\n"],
+        )
+        self.assertEqual(
+            turn.candidate.artifact["release_test_paths"],
+            ["package/tests/02.in", "package/tests/01.in"],
+        )
+
     def test_wrong_model_and_bridge_failures_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires model"):
             load_solver("icpc_light_v33_bridge", "gpt-oss-120b")
@@ -636,21 +708,36 @@ class BridgeRuntimeTests(unittest.TestCase):
                     "metadata": {"time_limit_ms": 2000},
                 },
             }
+            test_package = {
+                "schema_version": 1,
+                "task": "test_package",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "xhigh",
+                "input": {
+                    "problem_id": "p",
+                    "problem_statement": "statement",
+                    "metadata": {},
+                },
+            }
             with patch.dict(os.environ, {CONFIG_ENV: str(config)}):
                 generation_response = execute_request(generation)
                 hacking_response = execute_request(hacking)
                 coverage_response = execute_request(fault_coverage)
+                package_response = execute_request(test_package)
                 fault_response = execute_request(fault_exposure)
 
             self.assertEqual(generation_response["candidate"]["kind"], "solution")
             self.assertEqual(hacking_response["candidate"]["format"], "raw_input")
             self.assertEqual(coverage_response["candidate"]["kind"], "test_case")
+            self.assertEqual(package_response["candidate"]["kind"], "test_package")
+            self.assertEqual(package_response["candidate"]["tests"][0]["content"], "2 3\n")
             self.assertEqual(fault_response["candidate"]["kind"], "test_case")
             self.assertEqual(fault_response["candidate"]["format"], "raw_input")
             for response in (
                 generation_response,
                 hacking_response,
                 coverage_response,
+                package_response,
                 fault_response,
             ):
                 identity = response["pipeline_identity"]
@@ -660,6 +747,69 @@ class BridgeRuntimeTests(unittest.TestCase):
                 self.assertRegex(
                     identity["pipeline_signature_sha256"], r"^[0-9a-f]{64}$"
                 )
+
+    def test_package_parser_rejects_unsafe_or_inconsistent_release_plans(self) -> None:
+        def workspace(root, release, *, verdict="go", extra=False):
+            audit = root / "audit"
+            tests = root / "package" / "tests"
+            audit.mkdir(parents=True)
+            tests.mkdir(parents=True)
+            (audit / "readiness.md").write_text(
+                f"verdict: {verdict}\n", encoding="utf-8"
+            )
+            (audit / "regression-plan.json").write_text(
+                json.dumps({"release_tests": release}), encoding="utf-8"
+            )
+            (tests / "01.in").write_text("1\n", encoding="utf-8")
+            if extra:
+                (tests / "extra.in").write_text("2\n", encoding="utf-8")
+            return root
+
+        cases = (
+            ([{"input": "../secret.in"}], "go", False, "escapes"),
+            ([{"input": "package/tests/01.in"}], "stop", False, "not go"),
+            ([{"input": "package/tests/01.in"}], "go", True, "enumerate every"),
+            (
+                [{"input": f"package/tests/{index}.in"} for index in range(51)],
+                "go",
+                False,
+                "1 to 50",
+            ),
+        )
+        for release, verdict, extra, message in cases:
+            with self.subTest(message=message), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                workspace(root, release, verdict=verdict, extra=extra)
+                with self.assertRaisesRegex(BridgeContractError, message):
+                    _test_package_candidate(root, 1024 * 1024)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace(
+                root, [{"input": "package/tests/01.in"}], verdict="go"
+            )
+            link = root / "package" / "tests" / "link.in"
+            try:
+                link.symlink_to(root / "package" / "tests" / "01.in")
+            except OSError:
+                self.skipTest("symlinks are unavailable")
+            with self.assertRaisesRegex(BridgeContractError, "symlink"):
+                _test_package_candidate(root, 1024 * 1024)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            external = root / "external-audit"
+            external.mkdir()
+            (external / "readiness.md").write_text("verdict: go\n")
+            (external / "regression-plan.json").write_text(json.dumps({
+                "release_tests": [{"input": "package/tests/01.in"}]
+            }))
+            tests = root / "package" / "tests"
+            tests.mkdir(parents=True)
+            (tests / "01.in").write_text("1\n")
+            (root / "audit").symlink_to(external, target_is_directory=True)
+            with self.assertRaisesRegex(BridgeContractError, "audit.*safe directory"):
+                _test_package_candidate(root, 1024 * 1024)
 
     def test_runtime_rejects_skill_bundle_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

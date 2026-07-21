@@ -8,7 +8,7 @@ description: Build and harden an ICPC Light package within its preclassification
 ## Execution Contract
 
 Run this entry through the production stage runner with `gpt-5.6-sol` and
-reasoning effort `ultra`; do not spawn unreceipted nested agents. Wait for actual compilation, differential, wrong-route,
+reasoning effort `xhigh`; do not spawn unreceipted nested agents. Wait for actual compilation, differential, wrong-route,
 data, and regression evidence. If any required result is partial or failed,
 rerun the owning work within the reference-defined repair/round scope or report
 failure/escalation; never request readiness for an unfinished package.

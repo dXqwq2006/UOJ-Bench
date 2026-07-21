@@ -557,7 +557,17 @@ def run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", choices=("generation", "hacking", "fault_coverage", "fault_exposure"), required=True)
+    parser.add_argument(
+        "--task",
+        choices=(
+            "generation",
+            "hacking",
+            "fault_coverage",
+            "fault_exposure",
+            "test_package",
+        ),
+        required=True,
+    )
     parser.add_argument("--workspace", type=Path, required=True)
     parser.add_argument("--agent-image-id", required=True)
     parser.add_argument("--relay-container", default=DEFAULT_RELAY_CONTAINER)

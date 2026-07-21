@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import OrderedDict
 from dataclasses import asdict
 from typing import Any, Callable, Mapping, Sequence
 import ast
@@ -15,7 +14,7 @@ from .api import (
     GeneratedInput,
     HardTestGenInput,
     KitStage,
-    OracleProgram,
+
     ProgramExecutor,
     SuiteResult,
     TestCase,
@@ -23,6 +22,7 @@ from .api import (
 )
 
 
+MAX_FINAL_TESTS = 50
 CallDetails = Callable[[Any, str], tuple[str, Mapping[str, Any], Mapping[str, Any]]]
 _JSON_FENCE = re.compile(r"```json\s*(.*?)```", re.DOTALL)
 
@@ -104,7 +104,7 @@ def _stable_unique(values: Sequence[str]) -> list[str]:
 
 
 class HardTestGenPipeline:
-    """Two LLM calls followed by sandboxed generation and oracle consensus."""
+    """Statement-only two-stage test-package generator."""
 
     def __init__(self, model: str, call_details: CallDetails | None = None):
         self.model = model
@@ -116,10 +116,7 @@ class HardTestGenPipeline:
         return self.assemble_kit(first, second)
 
     def generate_iv_and_ojf(self, task: HardTestGenInput) -> KitStage:
-        if not task.oracle_programs:
-            raise ValueError("HardTestGen requires at least one correct program")
-        oracle = task.oracle_programs[0].source
-        iv_prompt = prompts.iv_and_ojf(task.problem_statement, oracle)
+        iv_prompt = prompts.iv_and_ojf(task.problem_statement)
         iv_raw, iv_message, iv_usage = self.call_details(iv_prompt, self.model)
         return KitStage(
             "iv_and_ojf",
@@ -136,8 +133,7 @@ class HardTestGenPipeline:
         validator = _optional_code(first.parsed.get("input_validator"))
         if validator is None:
             raise ValueError("IV/OJF response has no input_validator")
-        oracle = task.oracle_programs[0].source
-        ig_prompt = prompts.input_generation(task.problem_statement, oracle, validator)
+        ig_prompt = prompts.input_generation(task.problem_statement, validator)
         ig_raw, ig_message, ig_usage = self.call_details(ig_prompt, self.model)
         return KitStage(
             "input_generation",
@@ -195,26 +191,17 @@ class HardTestGenPipeline:
         generated = self._generate_inputs(kit, executor)
         if not generated:
             return SuiteResult("input_generation_failed", error="no valid inputs")
-        outputs, status = self._consensus_outputs(
-            task.oracle_programs[:5], generated, kit.output_judging_function, executor
-        )
-        if outputs is None:
-            return SuiteResult(status, generated_inputs=tuple(generated))
-        cases = tuple(
-            TestCase(item.content, output, item.method, item.generator)
-            for item, output in zip(generated, outputs)
-            if output is not None
-        )
-        if not cases:
+        if len(generated) > MAX_FINAL_TESTS:
             return SuiteResult(
-                "output_generation_failed",
+                "test_count_limit_exceeded",
                 generated_inputs=tuple(generated),
-                error="all consensus outputs were invalid",
+                error=f"suite contains {len(generated)} tests; limit is {MAX_FINAL_TESTS}",
             )
-        suite_bytes = sum(
-            len(case.input.encode("utf-8")) + len(case.output.encode("utf-8"))
-            for case in cases
+        cases = tuple(
+            TestCase(item.content, "", item.method, item.generator)
+            for item in generated
         )
+        suite_bytes = sum(len(case.input.encode("utf-8")) for case in cases)
         if suite_bytes > 500 * 1024 * 1024:
             return SuiteResult(
                 "test_cases_size_limit_exceeded",
@@ -341,139 +328,6 @@ else:
         ]
         return _stable_unique(values)[:target]
 
-    def _consensus_outputs(
-        self,
-        oracles: Sequence[OracleProgram],
-        inputs: Sequence[GeneratedInput],
-        output_judging_function: str | None,
-        executor: ProgramExecutor,
-    ) -> tuple[list[str | None] | None, str]:
-        required = min(2, len(oracles))
-        if required == 0:
-            return None, "output_generation_no_code_solutions"
-        overall_started = time.monotonic()
-        input_values = [item.content for item in inputs]
-        previous: list[list[str | None]] = []
-        for oracle in oracles:
-            if time.monotonic() - overall_started > 240:
-                return None, "output_generation_time_limit_exceeded"
-            solution_started = time.monotonic()
-            results = executor.run_many(
-                oracle.language,
-                oracle.source,
-                input_values,
-                time_limit_ms=5_000,
-                memory_limit_mb=15_360,
-            )
-            if time.monotonic() - solution_started > 50:
-                continue
-            if len(results) != len(inputs):
-                continue
-            outputs: list[str | None] = [
-                result.stdout if result.succeeded else None for result in results
-            ]
-            if sum(value is not None for value in outputs) < len(outputs) / 2:
-                continue
-            if required == 1:
-                return outputs, "complete"
-            for earlier in previous:
-                verdicts = self._judge_outputs(
-                    input_values, earlier, outputs, output_judging_function, executor
-                )
-                if verdicts and all(verdicts):
-                    return outputs, "complete"
-            previous.append(outputs)
-        if len(previous) < required:
-            return None, "output_generation_no_enough_valid_code_solutions"
-        return None, "output_generation_verification_failed"
-
-    @staticmethod
-    def _judge_outputs(
-        inputs: Sequence[str],
-        candidates: Sequence[str | None],
-        references: Sequence[str | None],
-        output_judging_function: str | None,
-        executor: ProgramExecutor,
-    ) -> list[bool]:
-        if output_judging_function is None:
-            return [
-                _default_output_equal(candidate, reference)
-                for candidate, reference in zip(candidates, references)
-            ]
-        source = f'''import json
-import sys
-
-{output_judging_function}
-
-try:
-    data = json.loads(sys.stdin.read())
-    verdict = output_judging_function(
-        input_str=data["input_str"],
-        candidate_output=data["candidate_output"],
-        reference_output=data["reference_output"],
-    )
-except Exception:
-    verdict = False
-print("Result: " + ("True" if verdict else "False"), end="")
-'''
-        payloads = [
-            json.dumps(
-                {
-                    "input_str": input_value,
-                    "candidate_output": candidate,
-                    "reference_output": reference,
-                }
-            )
-            for input_value, candidate, reference in zip(inputs, candidates, references)
-        ]
-        started = time.monotonic()
-        results = executor.run_many(
-            "python3", source, payloads,
-            time_limit_ms=5_000, memory_limit_mb=15_360,
-        )
-        if time.monotonic() - started > 15:
-            return []
-        if len(results) != len(payloads):
-            return []
-        return [
-            result.succeeded and result.stdout == "Result: True" for result in results
-        ]
-
-
-def _default_output_equal(candidate: str | None, reference: str | None) -> bool:
-    if candidate is None and reference is None:
-        return True
-    if not isinstance(candidate, str) or not isinstance(reference, str):
-        return False
-    normalize = lambda value: "\n".join(
-        line.rstrip() for line in value.rstrip().splitlines()
-    )
-    return normalize(candidate) == normalize(reference)
-
-
-def project_test_cases(
-    test_cases: Sequence[TestCase], budget: int
-) -> list[TestCase]:
-    """Round-robin suite groups for the fixed-budget benchmark adapter."""
-    if budget < 1:
-        raise ValueError("projection budget must be positive")
-    groups: OrderedDict[tuple[str, str], list[TestCase]] = OrderedDict()
-    for test_case in test_cases:
-        groups.setdefault((test_case.method, test_case.generator), []).append(test_case)
-    projected: list[TestCase] = []
-    offset = 0
-    while len(projected) < budget:
-        added = False
-        for values in groups.values():
-            if offset < len(values):
-                projected.append(values[offset])
-                added = True
-                if len(projected) == budget:
-                    break
-        if not added:
-            break
-        offset += 1
-    return projected
 
 
 def serializable(value: Any) -> Any:

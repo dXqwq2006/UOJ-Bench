@@ -184,6 +184,7 @@ def _load_uoj(
         FaultCoverageInput,
         FaultExposureInput,
         GenerationInput,
+        TestPackageInput,
         require_solver_support,
     )
     from solution.icpc_light_v33_bridge.solver import (
@@ -213,6 +214,7 @@ def _load_uoj(
         GenerationInput,
         FaultCoverageInput,
         FaultExposureInput,
+        TestPackageInput,
         require_solver_support,
         (BRIDGE_ENV, BRIDGE_CONFIG_ENV),
         run_hack_rollout_batch,
@@ -243,6 +245,7 @@ def _locked_skill_bundle_identity(
         "regular_file_count",
         "regular_file_bytes",
         "publication_redactions",
+        "publication_ports",
         "excluded",
     }
     if not isinstance(lock, dict) or set(lock) != required or lock.get("schema_version") != 1:
@@ -430,6 +433,7 @@ def run_smoke(
         GenerationInput,
         FaultCoverageInput,
         FaultExposureInput,
+        TestPackageInput,
         require_solver_support,
         env_names,
         rollout,
@@ -446,6 +450,7 @@ def run_smoke(
         require_solver_support(solver, "hacking")
         require_solver_support(solver, "fault_coverage")
         require_solver_support(solver, "fault_exposure")
+        require_solver_support(solver, "test_package")
         generation_turn = solver.start_generation(
             GenerationInput(
                 900000,
@@ -455,6 +460,26 @@ def run_smoke(
         ).next()
         if generation_turn.candidate is None:
             raise RuntimeError(f"generation returned no candidate: {generation_turn.error}")
+
+        package_session = solver.start_test_package(
+            TestPackageInput(
+                "package-smoke",
+                STATEMENT,
+                {"correct_code": "must never reach the package workspace"},
+            )
+        )
+        if package_session.initial_request["input"]["metadata"]:
+            raise RuntimeError("test package request exposed private metadata")
+        package_turn = package_session.next()
+        if package_turn.candidate is None:
+            raise RuntimeError(
+                f"test package returned no candidate: {package_turn.error}"
+            )
+        if [test.content for test in package_turn.candidate.tests] != [
+            "-7 4\n",
+            "2 3\n",
+        ]:
+            raise RuntimeError("test package did not preserve release_tests order")
 
         fault_coverage_turn = solver.start_fault_coverage(
             FaultCoverageInput(
@@ -586,13 +611,14 @@ def run_smoke(
         )
 
     job_dirs = sorted(path for path in workspaces.iterdir() if path.is_dir())
-    if len(job_dirs) != 5:
-        raise RuntimeError(f"expected five isolated jobs, found {len(job_dirs)}")
+    if len(job_dirs) != 6:
+        raise RuntimeError(f"expected six isolated jobs, found {len(job_dirs)}")
     saw_python_hack = False
     generation_pipeline_detail: dict[str, Any] | None = None
     hacking_pipeline_details: list[dict[str, Any]] = []
     fault_coverage_pipeline_detail: dict[str, Any] | None = None
     fault_exposure_pipeline_detail: dict[str, Any] | None = None
+    test_package_pipeline_detail: dict[str, Any] | None = None
     for job in job_dirs:
         names = {path.name for path in (job / "surface").iterdir()}
         if "correct.cpp" in names or "reference.cpp" in names:
@@ -638,6 +664,14 @@ def run_smoke(
                     "Fault Exposure did not complete its public-only task slice"
                 )
             fault_exposure_pipeline_detail = detail
+        elif request["task"] == "test_package":
+            if (
+                detail.get("execution_mode")
+                != "test-override-statement-only-package"
+                or names != {"statement.md", "task.json"}
+            ):
+                raise RuntimeError("Test Package did not remain statement-only")
+            test_package_pipeline_detail = detail
         else:
             raise RuntimeError(f"unexpected smoke task: {request['task']}")
         if request["task"] == "hacking" and request["input"]["submission_language"] == "Python3":
@@ -655,6 +689,7 @@ def run_smoke(
         or len(hacking_pipeline_details) != 2
         or fault_coverage_pipeline_detail is None
         or fault_exposure_pipeline_detail is None
+        or test_package_pipeline_detail is None
     ):
         raise RuntimeError("pipeline detail count does not match the five smoke jobs")
 
@@ -714,6 +749,21 @@ def run_smoke(
                 fault_exposure_turn.message["pipeline_identity"]
             ),
             "pipeline": fault_exposure_pipeline_detail,
+        },
+        "test_package": {
+            "passed": True,
+            "test_count": len(package_turn.candidate.tests),
+            "test_sha256": [
+                _sha256(test.content) for test in package_turn.candidate.tests
+            ],
+            "release_test_paths": package_turn.candidate.artifact[
+                "release_test_paths"
+            ],
+            "receipt_sha256": package_turn.message["receipt_sha256"],
+            "pipeline_identity_sha256": _canonical_sha256(
+                package_turn.message["pipeline_identity"]
+            ),
+            "pipeline": test_package_pipeline_detail,
         },
         "isolation": {
             "job_count": len(job_dirs),

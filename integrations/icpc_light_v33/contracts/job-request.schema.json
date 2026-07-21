@@ -13,7 +13,15 @@
   ],
   "properties": {
     "schema_version": {"const": 1},
-    "task": {"enum": ["generation", "hacking", "fault_coverage", "fault_exposure"]},
+    "task": {
+      "enum": [
+        "generation",
+        "hacking",
+        "fault_coverage",
+        "fault_exposure",
+        "test_package"
+      ]
+    },
     "model": {"const": "gpt-5.6-sol"},
     "reasoning_effort": {"const": "xhigh"},
     "input": {
@@ -75,7 +83,11 @@
       }
     },
     {
-      "if": {"properties": {"task": {"const": "fault_coverage"}}},
+      "if": {
+        "properties": {
+          "task": {"enum": ["fault_coverage", "test_package"]}
+        }
+      },
       "then": {
         "properties": {
           "input": {

@@ -7,7 +7,7 @@ Load [artifact-contracts.md](artifact-contracts.md) before writing evidence and
 [readiness.md](readiness.md) before routing a buildability grade.
 
 Run review and every independent reviewer with `gpt-5.6-sol` and reasoning
-effort `ultra`. A review handoff is complete only when its actual artifacts,
+effort `xhigh`. A review handoff is complete only when its actual artifacts,
 compilation/tests, and downstream schema are present; prose promising that a
 proof, contract, or std will be finished later is a failed review and must be
 rerun or explicitly escalated.

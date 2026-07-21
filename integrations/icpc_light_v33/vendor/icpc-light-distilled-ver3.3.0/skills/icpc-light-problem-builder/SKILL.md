@@ -36,7 +36,7 @@ clean rerun. This audit changes no release-package path or package payload.
 ## Enforce the Execution Model
 
 Run the orchestrator, every stage agent, every blind lane, and every independent
-reviewer with model `gpt-5.6-sol` and reasoning effort `ultra`. Record these
+reviewer with model `gpt-5.6-sol` and reasoning effort `xhigh`. Record these
 exact values in `audit/run-state.md` and in every executable receipt. Do not
 fall back to another model, shorten reasoning effort, or silently reuse output
 from a differently configured agent. If this exact pair is unavailable, stop
@@ -203,7 +203,7 @@ order. Then validate the stage's semantic handoff gate before dispatching a
 downstream stage. If a delegated agent returns prose,
 future-work suggestions, provisional placeholders, empty files, a failed
 command, or only part of its contract, reject that handoff and rerun the same
-stage in a fresh `gpt-5.6-sol`/`ultra` context. Continue until its gate passes or
+stage in a fresh `gpt-5.6-sol`/`xhigh` context. Continue until its gate passes or
 an explicit Light round/repair limit, genuine external blocker, or stop rule
 requires a recorded failure/escalation. Never hide unfinished work behind a
 later stage.

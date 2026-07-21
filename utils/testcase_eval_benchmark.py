@@ -1258,6 +1258,32 @@ def _expected_counts(store: RunStore) -> dict[str, int]:
     manifest = store.manifest()
     policies = manifest.get("policies", [])
     tasks = manifest.get("tasks", [])
+    package_contract = manifest.get("test_package_contract")
+    if (
+        isinstance(package_contract, Mapping)
+        and len(policies) == 1
+        and tasks == [1]
+        and package_contract.get("policy") == policies[0]
+    ):
+        policy = str(policies[0])
+        generations = store.connection.execute(
+            "SELECT COUNT(*) FROM package_tests WHERE policy = ?", (policy,)
+        ).fetchone()[0]
+        executions = store.connection.execute(
+            """
+            SELECT COALESCE(SUM(t.test_count * s.submission_count), 0)
+            FROM (
+                SELECT problem_id, COUNT(*) AS test_count FROM package_tests
+                WHERE policy = ? GROUP BY problem_id
+            ) AS t
+            JOIN (
+                SELECT problem_id, COUNT(*) AS submission_count FROM submissions
+                WHERE dataset_name = 'submission_all' GROUP BY problem_id
+            ) AS s USING(problem_id)
+            """,
+            (policy,),
+        ).fetchone()[0]
+        return {"generations": generations, "executions": executions}
     task1_generations = int(
         manifest.get("task1_generations", PAPER_GENERATIONS[1])
     )

@@ -34,7 +34,7 @@ from statement_resources import StatementResourceError, load_statement_resources
 
 
 REQUIRED_MODEL = "gpt-5.6-sol"
-REQUIRED_REASONING_EFFORT = "ultra"
+REQUIRED_REASONING_EFFORT = "xhigh"
 RECEIPT_ROOT = PurePosixPath("audit/private/stage-executions")
 ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 HASH_RE = re.compile(r"[0-9a-f]{64}")

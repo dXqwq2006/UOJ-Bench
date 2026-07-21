@@ -52,6 +52,13 @@ class FaultExposureInput:
 
 
 @dataclass(frozen=True)
+class TestPackageInput:
+    problem_id: str
+    problem_statement: str
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SolutionCandidate:
     source: str
 
@@ -78,6 +85,12 @@ class TestCaseCandidate:
 
 
 @dataclass(frozen=True)
+class TestPackageCandidate:
+    tests: tuple[TestCaseCandidate, ...]
+    artifact: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SolverCapabilities:
     generation: bool = True
     hacking: bool = True
@@ -89,6 +102,8 @@ class SolverCapabilities:
     fault_exposure: bool = False
     fault_coverage_feedback: bool = False
     fault_exposure_feedback: bool = False
+    test_package: bool = False
+    test_package_feedback: bool = False
 
 
 class FeedbackKind(str, Enum):
@@ -157,6 +172,11 @@ class Solver(Protocol):
     ) -> SolverSession[TestCaseCandidate]:
         ...
 
+    def start_test_package(
+        self, task: TestPackageInput
+    ) -> SolverSession[TestPackageCandidate]:
+        ...
+
 
 def solver_capabilities(solver: Any) -> SolverCapabilities:
     """Return declared capabilities, defaulting old solvers to current behavior."""
@@ -175,6 +195,7 @@ def require_solver_support(solver: Any, task: str, *, feedback: bool = False) ->
         "repair",
         "fault_coverage",
         "fault_exposure",
+        "test_package",
     }:
         raise ValueError(f"unknown solver task: {task}")
 

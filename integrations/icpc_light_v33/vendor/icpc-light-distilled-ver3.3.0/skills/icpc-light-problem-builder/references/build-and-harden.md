@@ -9,7 +9,7 @@ audit files and [topic-routing.md](topic-routing.md) before consulting the
 vendored topic knowledge.
 
 Run the construction/testing/attack stage through its production receipt with
-`gpt-5.6-sol` and reasoning effort `ultra`; do not spawn unreceipted nested
+`gpt-5.6-sol` and reasoning effort `xhigh`; do not spawn unreceipted nested
 agents. Keep the owning stage active until its executable
 result and audit contract are complete. A child that only proposes code/data,
 leaves commands unrun, misses its quota, or reports future work has failed the

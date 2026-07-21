@@ -66,8 +66,9 @@ integration 已提供 `bin/icpc-light-uoj-zero-mount-scheduler`。生产 config 
 scheduler 会逐文件核验该 manifest，不接受只绑定入口脚本的配置。
 `docker/agent-xhigh.Dockerfile` 从已审核
 v3.3 agent image 派生，只替换冻结的 Codex provider gate，并把实际 API effort 固定为
-`xhigh`。vendored v3.3 文档里的旧 `ultra` 字样属于上游发布物，不能作为实际调用参数；
-正式 receipt、bridge request、Codex argv 和派生 image label 必须全部是 `xhigh`。
+`xhigh`。仓库中的 vendored 副本已经把上游 `ultra` 指令、检查、verifier、fixture 与
+receipt contract 全量端口到 `xhigh`，并在 lock 的 `publication_ports` 中记录；正式
+receipt、bridge request、Codex argv 和派生 image label 必须全部是 `xhigh`。
 
 ## 两阶段 Hacking
 

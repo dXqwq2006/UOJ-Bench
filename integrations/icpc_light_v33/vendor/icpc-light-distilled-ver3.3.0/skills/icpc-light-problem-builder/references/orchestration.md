@@ -10,7 +10,7 @@ one explicit TL and one explicit ML in `statement.md`; on a missing,
 conflicting, unsupported, or out-of-range declaration, return failure before
 writing `audit/run-state.md` or launching any agent.
 
-Dispatch every agent with `gpt-5.6-sol` and reasoning effort `ultra`. Reject a
+Dispatch every agent with `gpt-5.6-sol` and reasoning effort `xhigh`. Reject a
 handoff whose recorded execution configuration differs. Model unavailability
 is a workflow failure, never permission to substitute a cheaper or weaker run.
 Launch every non-blind stage with `scripts/run_stage_agent.py`; a Markdown
@@ -72,7 +72,7 @@ Use these stage budgets while parallelizing independent work:
    package/audit artifacts. Preserve valid existing work and record gaps.
 3. Create or update `audit/run-state.md` using the artifact contract. Never
    infer that an existing artifact passed merely because it exists. Record and
-   enforce `gpt-5.6-sol` / `ultra` before dispatch.
+   enforce `gpt-5.6-sol` / `xhigh` before dispatch.
 4. Freeze a reproducible contestant public surface. Actually launch the initial
    2+2 blind wave and wait for every child. Replace any failed, contaminated,
    or incomplete lane from a fresh workspace until the initial batch is clean.
@@ -130,7 +130,7 @@ python3 "$SKILL_ROOT/scripts/run_stage_agent.py" \
   --run-id UNIQUE_RUN_ID \
   --prompt-file audit/private/stage-prompts/PROMPT.txt \
   --model gpt-5.6-sol \
-  --reasoning-effort ultra
+  --reasoning-effort xhigh
 ```
 
 Use the fixed stage IDs in [artifact-contracts.md](artifact-contracts.md).

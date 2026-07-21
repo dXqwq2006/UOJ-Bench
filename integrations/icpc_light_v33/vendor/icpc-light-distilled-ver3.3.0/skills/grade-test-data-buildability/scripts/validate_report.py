@@ -16,7 +16,7 @@ from typing import Any
 
 
 REQUIRED_MODEL = "gpt-5.6-sol"
-REQUIRED_EFFORT = "ultra"
+REQUIRED_EFFORT = "xhigh"
 FIELDS = (
     "schema_version",
     "agent_model",

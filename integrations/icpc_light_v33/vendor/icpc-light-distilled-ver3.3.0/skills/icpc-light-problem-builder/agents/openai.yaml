@@ -1,4 +1,4 @@
 interface:
   display_name: "ICPC Light Problem Builder"
   short_description: "Persistently blind-solve and finish ICPC packages"
-  default_prompt: "Using gpt-5.6-sol with ultra reasoning for every stage and child, use $icpc-light-problem-builder to run public-only blind solves until verified or the shared 120-minute blind deadline fails, then advance only through completed machine gates to the mandatory std/oracle/validator package, hardening, regression, and final readiness verification."
+  default_prompt: "Using gpt-5.6-sol with xhigh reasoning for every stage and child, use $icpc-light-problem-builder to run public-only blind solves until verified or the shared 120-minute blind deadline fails, then advance only through completed machine gates to the mandatory std/oracle/validator package, hardening, regression, and final readiness verification."

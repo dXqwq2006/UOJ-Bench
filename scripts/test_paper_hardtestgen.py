@@ -7,13 +7,18 @@ import argparse
 import json
 import os
 
+import tempfile
 from solution.hardtestgen.lightcp import HardTestGenLightCP
 from utils.hardtestgen_benchmark import (
-    DEFAULT_PROJECTION_BUDGET,
     benchmark_kind,
     generate_kits,
     generate_suites,
     pipeline_summary,
+)
+from utils.test_package_benchmark import (
+    package_metrics,
+    package_progress,
+    sync_jury_executions,
 )
 from utils.testcase_eval_benchmark import RunStore
 
@@ -28,7 +33,6 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--result-dir", type=Path, required=True)
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--workers", type=int, default=16)
-    parser.add_argument("--projection-budget", type=int, default=DEFAULT_PROJECTION_BUDGET)
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--github-settings", action="store_true")
     parser.add_argument(
@@ -40,6 +44,16 @@ def _arguments() -> argparse.Namespace:
 
 def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+
+
+def _write_summary(path: Path, value: object) -> None:
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, delete=False
+    ) as stream:
+        json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
+        stream.write("\n")
+        temporary = Path(stream.name)
+    temporary.replace(path)
 
 
 def _require_github_settings() -> None:
@@ -72,7 +86,6 @@ def main() -> None:
                     store,
                     model=args.model,
                     workers=args.workers,
-                    projection_budget=args.projection_budget,
                     retry_errors=args.retry_errors,
                 )
             )
@@ -82,7 +95,6 @@ def main() -> None:
                     store,
                     executor=executor,
                     workers=args.workers,
-                    projection_budget=args.projection_budget,
                     retry_errors=args.retry_errors,
                 )
             )
@@ -90,19 +102,35 @@ def main() -> None:
             if benchmark == "testcase-eval":
                 from utils.testcase_eval_lightcp import run_judge
 
-                _print(run_judge(database, base_url=args.lightcp_url, workers=args.workers))
+                judge = run_judge(
+                    database, base_url=args.lightcp_url, workers=args.workers
+                )
             else:
                 from utils.codecontests_plus import run_judge
 
-                _print(run_judge(store, base_url=args.lightcp_url, workers=args.workers))
+                judge = run_judge(
+                    store, base_url=args.lightcp_url, workers=args.workers
+                )
+            _print({
+                "judge": judge,
+                "jury_executions": sync_jury_executions(store, "hardtestgen"),
+            })
         else:
+            sync_jury_executions(store, "hardtestgen")
             detail = pipeline_summary(store)
             if benchmark == "testcase-eval":
-                from utils.testcase_eval_benchmark import write_summary
+                from utils.testcase_eval_benchmark import score as benchmark_score
             else:
-                from utils.codecontests_plus import write_summary
+                from utils.codecontests_plus import score as benchmark_score
 
-            score = write_summary(store, args.result_dir / "summary.json")
+            score = benchmark_score(store)
+            score["test_package"] = {
+                "progress": package_progress(store, "hardtestgen"),
+                "metrics": package_metrics(
+                    store, dataset=benchmark, policy="hardtestgen"
+                ),
+            }
+            _write_summary(args.result_dir / "summary.json", score)
             _print({"pipeline": detail, "benchmark_complete": score["complete"]})
 
 

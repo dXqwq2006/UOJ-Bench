@@ -10,7 +10,7 @@ canonical `audit/data-buildability.md` and freshly materialize the selected
 full-solution source at `audit/private/selected-standard-route.cpp`;
 downstream agents own all later construction.
 
-Run this grader with model `gpt-5.6-sol` and reasoning effort `ultra`. Refuse a
+Run this grader with model `gpt-5.6-sol` and reasoning effort `xhigh`. Refuse a
 lower/different execution configuration. Do not write a full-build grade until
 the blind-stage verifier passes; an incomplete input returns to the owning
 stage or becomes an explicit audit-only provisional opinion, never a fabricated
@@ -117,7 +117,7 @@ Start `audit/data-buildability.md` with exactly these stable fields:
 ---
 schema_version: 2
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 preclassification: P1-random-strong | P2-structured-bounded | P3-adversarial-intensive | S-stop
 scam_status: none | suspected | confirmed
 data_buildability: D0-direct | D1-structured | D2-specialist | D3-stop

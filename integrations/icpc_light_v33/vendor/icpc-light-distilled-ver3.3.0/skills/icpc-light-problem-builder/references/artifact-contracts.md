@@ -91,7 +91,7 @@ code, blind prompts/workspaces, audits, or escalation notes into `package/`.
 Maintain `audit/run-state.md` as the canonical current state. Include:
 
 - problem identifier and active stage/status;
-- `agent_model: gpt-5.6-sol`, `agent_reasoning_effort: ultra`, and
+- `agent_model: gpt-5.6-sol`, `agent_reasoning_effort: xhigh`, and
   `model_policy_status: enforced`;
 - formal preclassification, compatibility grade/profile, shortcut state, and
   whether the grade is provisional;
@@ -193,7 +193,7 @@ example, a P2 report begins:
 ---
 schema_version: 2
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 preclassification: P2-structured-bounded
 scam_status: none
 data_buildability: D1-structured
@@ -280,7 +280,7 @@ Start `audit/solution-review-draft.md` with:
 ---
 schema_version: 1
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 review_status: passed
 blind_source_path: blind-solves/icpc-light/neutral-01/workspace/main.cpp
 blind_source_sha256: 0000000000000000000000000000000000000000000000000000000000000000
@@ -306,7 +306,7 @@ This first fresh reviewer owns the algorithm/proof only. Then start
 ---
 schema_version: 1
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 status: passed
 materialization_mode: exact-copy
 blind_source_path: blind-solves/icpc-light/neutral-01/workspace/main.cpp
@@ -330,7 +330,7 @@ Start `audit/solution-review.md` with:
 ---
 schema_version: 1
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 review_status: passed
 std_compilation: passed
 public_samples: pending-machine-regression
@@ -806,7 +806,7 @@ Start `audit/regression.md` with:
 ---
 schema_version: 1
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 status: passed
 validator: passed
 differential: passed
@@ -869,7 +869,7 @@ Start `audit/readiness.md` with:
 schema_version: 2
 verdict: hold
 agent_model: gpt-5.6-sol
-agent_reasoning_effort: ultra
+agent_reasoning_effort: xhigh
 model_policy_status: enforced
 preclassification: P2-structured-bounded
 workflow_profile: L1-ordinary
@@ -928,7 +928,7 @@ fields, or non-empty blockers.
 
 Write each stage prompt below `audit/private/stage-prompts/` and launch it with
 `scripts/run_stage_agent.py`, exact `--model gpt-5.6-sol`, and
-`--reasoning-effort ultra`. The runner preserves immutable attempts below
+`--reasoning-effort xhigh`. The runner preserves immutable attempts below
 `audit/private/stage-executions/<stage>/<run-id>/` and publishes
 `<stage>/current.json` only for a successful production run. The fixed stages
 are `preclassification`, `solution-draft`, `std-materialization`,

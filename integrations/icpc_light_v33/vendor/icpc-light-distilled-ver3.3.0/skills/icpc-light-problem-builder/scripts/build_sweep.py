@@ -20,8 +20,8 @@ DEFAULT_NEUTRAL_COUNT = 2
 DEFAULT_DECEPTIVE_COUNT = 2
 DEFAULT_WORKSPACE_ROOT = "blind-solves/icpc-light"
 REQUIRED_MODEL = "gpt-5.6-sol"
-DEFAULT_REASONING_EFFORT = "ultra"
-REQUIRED_REASONING_EFFORT = "ultra"
+DEFAULT_REASONING_EFFORT = "xhigh"
+REQUIRED_REASONING_EFFORT = "xhigh"
 MAX_WAVE_COUNT = 3
 PHASES = ("initial", "replacement", "focused-neutral", "focused-deceptive")
 

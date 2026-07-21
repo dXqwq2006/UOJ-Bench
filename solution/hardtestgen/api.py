@@ -7,17 +7,9 @@ from typing import Any, Mapping, Protocol, Sequence
 
 
 @dataclass(frozen=True)
-class OracleProgram:
-    program_id: str
-    language: str
-    source: str
-
-
-@dataclass(frozen=True)
 class HardTestGenInput:
     problem_id: str
     problem_statement: str
-    oracle_programs: Sequence[OracleProgram]
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
 

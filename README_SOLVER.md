@@ -11,7 +11,7 @@ benchmark, task, solver/competitor, evaluator, and upstream-source inventory.
 UOJ-Bench task -> Solver session -> typed candidate -> original UOJ evaluation
 ```
 
-`solution/api.py` defines five entry points:
+`solution/api.py` defines six entry points:
 
 ```python
 solver.start_generation(task).next()
@@ -20,6 +20,7 @@ solver.start_repair(task).next(feedback)
 solver.start_fault_coverage(task).next()
 solver.start_fault_exposure(task).next()
 ```
+solver.start_test_package(task).next()
 
 Agent runners record feedback as soon as it is produced, then request the next
 turn. Passing feedback directly to `next()` remains supported for custom use.
@@ -54,7 +55,7 @@ python -m scripts.test_hack_agent \
   --max_trials 5
 ```
 
-All five task CLIs accept `--solver` and default to `prompt`. A custom pipeline
+The original five task CLIs accept `--solver` and default to `prompt`. A custom pipeline
 can use any model stack without adding model code to `utils/` or the runners.
 
 ## ICPC Light v3.3 bridge
@@ -62,9 +63,11 @@ can use any model stack without adding model code to `utils/` or the runners.
 `solution/icpc_light_v33_bridge/` connects the frozen ICPC Light v3.3 skills
 pipeline through a separate JSON process boundary. It supports one-shot UOJ
 Generation and Hacking, TestCase-Eval Task 2 Fault Exposure, and public-only
-Fault Coverage for TestCase-Eval Task 1 and CodeContests+ Verified. It requires
-the exact model contract `gpt-5.6-sol` with reasoning effort `ultra`, and fails
-closed for Repair and feedback rounds. The bridge config pins
+Fault Coverage for TestCase-Eval Task 1 and CodeContests+ Verified. Its
+statement-only Test Package entry runs the full ICPC Light workflow and returns
+the ordered release package, capped at 50 inputs. It requires the exact model
+contract `gpt-5.6-sol` with reasoning effort `xhigh`, an explicit port from the
+vendored upstream `ultra` setting, and fails closed for Repair and feedback rounds. The bridge config pins
 the complete skill tree hash and records a hash-bound pipeline identity with
 every candidate; TestCase-Eval result databases also bind its stable pipeline
 signature before persisting a completed generation. The shared offline
@@ -81,8 +84,9 @@ env -u UOJ_API_KEY -u TATU_API_KEY -u OPENAI_API_KEY \
 ```
 
 This deterministic test executes the real v3.3 sweep/review scripts, the native
-UOJ Hacking rollout runner, and a typed Fault Exposure job with injected
-workers. It makes no model or UOJ request and is not a benchmark score. See
+UOJ Hacking rollout runner, typed Fault Coverage/Fault Exposure jobs, and an
+ordered statement-only package job with injected workers. It makes no model or
+UOJ request and is not a benchmark score. See
 [the integration guide](docs/ICPC_LIGHT_V33_BRIDGE.zh-CN.md) and
 [zero-mount server handoff](docs/ICPC_LIGHT_V33_ZERO_MOUNT_HANDOFF.zh-CN.md)
 before configuring a production agent command.
@@ -312,26 +316,54 @@ weaker than go-judge namespace isolation and must run only the public benchmark
 sources. Use the Docker/go-judge evaluator on a host that permits namespaces
 for an isolation-equivalent final run.
 
+## Statement-only Test Package benchmark
+
+`utils/test_package_benchmark.py` defines the shared experiment unit: a solver
+receives a public problem statement and returns one ordered package. The final
+package contains at most 50 inputs; overflow rejects the whole package. Hidden
+accepted/wrong programs, validators, checkers, and execution assets remain in
+the benchmark jury. Scoring reports valid rate, Coverage@1/5/10/20/50, and
+whole-package union coverage. The package is mirrored into the existing jury
+tables only after it passes the package contract, so TCE and CodeContests+
+reuse their established execution backends.
+
+The TestCase-Eval Task 1 baseline keeps its published behavior byte-for-byte:
+20 independent calls, one input per call. `sync-native` aggregates those 20
+slots after generation without changing a prompt or model request. The same
+method on CodeContests+ is explicitly an adapter, not a native paper result.
+
+ICPC Light and HardTestGen instead implement their native complex unit: one
+pipeline invocation returns the complete ordered package. They are never
+projected into 20 independent pseudo-calls, and the ICPC package is not sent to
+UOJ Hacking or TestCase-Eval Task 2.
+
+Use `scripts.run_test_packages` for native aggregation, ICPC generation, hidden
+jury execution, and package statistics. Each competitor uses a fresh prepared
+result directory.
+
 ## HardTestGen
 
-`solution/hardtestgen/` ports the two-stage pipeline from
-LeiLiLab/HardTestGen commit `0355315`. The first independent model call writes
-the Python input validator and optional output-judging function. The second
-call writes ten small direct inputs plus RPGen/SPGen and HackGen Python
-generators. Generated inputs are filtered by the generated validator, then up
-to five published correct programs produce outputs; two exact-consensus
-oracles are required, matching the current GitHub implementation.
+`solution/hardtestgen/` ports the two-stage pipeline from LeiLiLab/HardTestGen
+commit `0355315`. The first model call writes the Python input validator and
+optional output-judging function. The second writes direct inputs plus
+RPGen/SPGen and HackGen Python generators. Generated inputs are filtered by the
+generated validator and stable-deduplicated in source order.
 
-The upstream prompt TOMLs are vendored unchanged. Only execution is adapted:
-generated Python, output judges, and oracle programs run through the existing
-LightCP profiles because the H100 host cannot run upstream's `bwrap` setup.
-The prepared benchmark validator/checker remains hidden from the model and is
-used only by the final benchmark judge. Complete variable-size suites and all
-raw model artifacts are stored in `hardtestgen_calls`, `hardtestgen_kits`, and
-`hardtestgen_suites`. The compatibility layer uses stable de-duplication and a
-category round-robin projection to 20 inputs; missing inputs become invalid
-`ERROR` rows so pipeline failures stay in the benchmark denominator. These two
-reproducibility choices are recorded as adapter differences in the manifest.
+The paper implementation receives reference programs and uses them to create
+and cross-check outputs. This benchmark adapter deliberately removes reference
+programs from both prompt stages. It supplies only the statement, publishes
+inputs without answer files, and delegates all validation and scoring to the
+hidden TCE or CodeContests+ jury. The two prompt changes and hidden-jury
+replacement are recorded in `test_package_contract.deltas`.
+
+The complete variable-size suite is published as one ordered package with a
+hard limit of 50 inputs. There is no category round-robin projection and no
+padding with `ERROR` rows. If generation produces more than 50 inputs, the
+whole package is marked `over_limit` and contributes no scoreable test.
+
+Generated Python runs through the existing LightCP profiles because the H100
+host cannot run upstream's `bwrap` setup. Raw model calls, kits, suites, package
+calls, package tests, and jury executions are separately checkpointed.
 
 Start with a fresh database prepared by either existing benchmark runner. For
 CodeContests+, run its compile `audit` phase before this sequence.
@@ -355,8 +387,8 @@ python -m scripts.test_paper_hardtestgen --phase stats \
 ```
 
 `--retry-errors` retries failed kit calls or suite execution while preserving
-completed checkpoints. Do not retry a projected suite after its benchmark
-executions have been written; use a fresh result directory for that case.
+completed checkpoints. Once hidden jury executions exist, the package is
+immutable; use a fresh result directory to change it.
 
 ## Hacking batches
 

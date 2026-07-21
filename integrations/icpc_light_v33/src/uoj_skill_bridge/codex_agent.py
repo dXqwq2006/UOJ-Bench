@@ -33,9 +33,9 @@ def _prompt(task: str) -> str:
     common = """Work only inside the current job workspace. Do not inspect any
 parent directory, benchmark dataset, historical result, official solution, UOJ
 page, or network resource. The only task inputs are under surface/. First read
-skills/icpc-light-problem-builder/SKILL.md and only its directly relevant
-blind-solving or adversarial-test references. Do not reveal chain of thought.
-Do not modify surface/ or skills/.
+skills/icpc-light-problem-builder/SKILL.md and follow the references relevant to
+the requested workflow. Do not reveal chain of thought. Do not modify surface/
+or skills/.
 """
     if task == "generation":
         return common + """
@@ -67,6 +67,24 @@ answer file, or another file under output/. The benchmark will run its own
 validator, oracle, checker, and local evaluator; do not call UOJ or any external
 judge. Each invocation produces one candidate; the native benchmark runner
 controls the independent-generation budget.
+"""
+    if task == "test_package":
+        return common + """
+This is the statement-only ICPC Light v3.3 package benchmark. Read only
+surface/statement.md and copy it to statement.md as the immutable problem
+specification. Execute the full ICPC Light workflow: blind routes, standard
+solution and oracle, validator/checker, generators, qualified wrong routes,
+adversarial hardening, regression gate, completion receipt, and independent
+readiness review. This benchmark port uses gpt-5.6-sol with xhigh for every
+model call; record that explicit delta from the vendored ultra configuration.
+
+The final scoreable package is the ordered release_tests array in
+audit/regression-plan.json and the matching package/tests/**/*.in files. It must
+contain at most 50 tests. Internal differential, stress, survivability, and
+adversarial executions are not part of that limit. Do not seek or use benchmark
+accepted/wrong programs, validators, checkers, dataset statistics, UOJ, or any
+external judge. Finish only after audit/readiness.md has verdict: go and the
+vendored readiness verifier succeeds. Keep output/ empty.
 """
     return common + """
 This is a TestCase-Eval Task 2 Fault Exposure slice. Read
@@ -147,7 +165,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--task",
-        choices=("generation", "hacking", "fault_coverage", "fault_exposure"),
+        choices=(
+            "generation",
+            "hacking",
+            "fault_coverage",
+            "fault_exposure",
+            "test_package",
+        ),
         required=True,
     )
     parser.add_argument("--workspace", type=Path, required=True)

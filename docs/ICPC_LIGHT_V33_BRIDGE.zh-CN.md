@@ -4,7 +4,7 @@
 
 `solution/icpc_light_v33_bridge` 是 UOJ-Bench 原生 typed solver。它不修改
 dataset、官方 prompt、UOJ client 或评分逻辑，而是把 Generation、Hacking、
-Fault Coverage 与 Fault Exposure 输入转换成一个独立 JSON bridge job：
+Fault Coverage、Fault Exposure 与 Test Package 输入转换成独立 JSON bridge job：
 
 ```text
 UOJ / TestCase-Eval runner
@@ -12,7 +12,7 @@ UOJ / TestCase-Eval runner
   -> integrations/icpc_light_v33/bin/icpc-light-uoj-bridge
   -> 每题独立 public-only workspace
   -> 冻结 skills + 配置的 task agent
-  -> SolutionCandidate / HackCandidate / TestCaseCandidate
+  -> SolutionCandidate / HackCandidate / TestCaseCandidate / TestPackageCandidate
   -> 原生 UOJ / TestCase-Eval evaluator
 ```
 
@@ -24,6 +24,7 @@ UOJ / TestCase-Eval runner
 | Hacking | one-shot | `output/candidate.in` 或 `output/generator.py` |
 | Fault Coverage / TCE Task 1 / CC+V | one-shot；次数由原生 runner 控制 | `output/candidate.in` 或 `output/generator.py` |
 | Fault Exposure / TCE Task 2 | one-shot | `output/candidate.in` 或 `output/generator.py` |
+| Test Package / TCE Task 1 与 CC+V 数据 | 完整 statement-only workflow | 有序 `audit/regression-plan.json.release_tests` 与 `package/tests/**/*.in`，至多 50 个 |
 | Repair / feedback | 不支持 | fail closed |
 
 模型合同是精确 `gpt-5.6-sol`、`reasoning_effort=xhigh`。改变模型、effort、bundle、
@@ -47,15 +48,17 @@ vendored bundle 只包含其 `MANIFEST.sha256` 白名单中的 106 个文件和 
 不包含嵌套 `.git`、`.DS_Store`、`__pycache__`、pyc 或运行状态。当前 lock：
 
 ```text
-tree_sha256 = d6eef3006a438086adfc6c4695d2cd52d9262e929ab497ac4a8576671f283234
+tree_sha256 = 19b2e79ac3c8f5e0c3ee12100b264908e164ea5be604c1e23df37c48b83c4340
 files       = 107
 bytes       = 1637992
 ```
 
 lock 同时保留原始 source manifest 与 `RELEASE.json` 的 SHA-256。发布副本只净化了
 `RELEASE.json` 中一条宿主机专属 Docker socket 绝对路径，并在
-`publication_redactions` 中记录；净化后的 manifest 另有独立 hash，不会冒充原始
-release 字节。
+`publication_redactions` 中记录。为满足统一实验配置，发布副本还把所有 model effort
+指令、执行检查、verifier、fixture 与 receipt contract 从上游 `ultra` 端口到 `xhigh`，
+并在 `publication_ports` 中记录。重新生成的 manifest/tree hash 不冒充原始 release；
+原始 source hash 仍保留在 lock 中。
 
 ## Bridge config
 
@@ -70,7 +73,7 @@ release 字节。
   "workspace_device": 0,
   "skill_bundle_root": "/absolute/repo/integrations/icpc_light_v33/vendor/icpc-light-distilled-ver3.3.0",
   "skill_bundle_device": 0,
-  "expected_skill_bundle_sha256": "d6eef3006a438086adfc6c4695d2cd52d9262e929ab497ac4a8576671f283234",
+  "expected_skill_bundle_sha256": "19b2e79ac3c8f5e0c3ee12100b264908e164ea5be604c1e23df37c48b83c4340",
   "agent_command": [
     "/absolute/repo/integrations/icpc_light_v33/bin/icpc-light-uoj-zero-mount-scheduler",
     "--agent-image-id", "sha256:<xhigh-agent-image-id>",
@@ -125,11 +128,15 @@ env -u UOJ_API_KEY -u TATU_API_KEY -u OPENAI_API_KEY \
   metadata，确认工作区没有目标提交，并用隐藏在 evaluator 侧的错解/参考解做语义检查；
 - Fault Exposure：按 TestCase-Eval Task 2 typed contract 产出原始输入，并用本地错误解和
   独立参考程序确认能够暴露目标错误提交；
-- 5 个隔离 workspace、receipt、bundle/surface 不变性、非 C++ wrong source、无正确解泄漏。
+- Test Package：只暴露题面，确认 `release_tests` 顺序、至多 50 个输入、空 `output/`
+  和完整 package file-set 检查；
+- 6 个隔离 workspace、receipt、bundle/surface 不变性、非 C++ wrong source、无正确解泄漏。
 
-CC+V 的完整运行仍由 `scripts.run_codecontests_plus` 完成：每题 20 个独立 bridge
-job，随后使用数据集原生 validator、正确提交 oracle、checker 和 LightCP 执行层。
-这些程序和评测资产不会进入 solver workspace。
+旧的 one-shot Fault Coverage 对照仍可由 `scripts.run_codecontests_plus` 以每题 20 个
+独立 bridge job 运行。新的统一整包实验改用 `scripts.run_test_packages`：每题只有一次
+完整 ICPC Light workflow，并返回整包。两条路径都复用数据集原生 validator、正确提交
+oracle、checker 和 LightCP 执行层；这些程序和评测资产不会进入 solver workspace，
+两种 call contract 也不能混在同一结果目录。
 
 fixture 是 test override，报告固定写
 `deterministic-pipeline-smoke-test-override-no-model-no-uoj`。它证明 adapter、pipeline

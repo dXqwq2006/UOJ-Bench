@@ -1289,6 +1289,11 @@ def score(store: RunStore) -> dict[str, Any]:
     if len(policies) != 1:
         raise RuntimeError("CodeContests+ result directory must contain exactly one policy")
     policy = str(policies[0])
+    package_contract = manifest.get("test_package_contract")
+    package_mode = (
+        isinstance(package_contract, Mapping)
+        and package_contract.get("policy") == policy
+    )
     problems = list(
         store.connection.execute(
             "SELECT problem_id, metadata_json FROM problems ORDER BY problem_id"
@@ -1302,7 +1307,17 @@ def score(store: RunStore) -> dict[str, Any]:
     }
     for problem in problems:
         metadata = json.loads(problem["metadata_json"])
-        budget = _budget(metadata, manifest)
+        if package_mode:
+            package_run = store.connection.execute(
+                """
+                SELECT declared_test_count FROM package_runs
+                WHERE policy = ? AND problem_id = ?
+                """,
+                (policy, problem["problem_id"]),
+            ).fetchone()
+            budget = package_run["declared_test_count"] if package_run else 0
+        else:
+            budget = _budget(metadata, manifest)
         programs = {
             row["submission_id"]: row["submission_type"]
             for row in store.connection.execute(
@@ -1405,10 +1420,31 @@ def score(store: RunStore) -> dict[str, Any]:
             (policy,),
         )
     )
-    expected_generations = sum(
-        _budget(json.loads(problem["metadata_json"]), manifest)
-        for problem in problems
-    )
+    package_rollout_complete = True
+    if package_mode:
+        expected_generations = store.connection.execute(
+            "SELECT COUNT(*) FROM package_tests WHERE policy = ?", (policy,)
+        ).fetchone()[0]
+        package_runs = store.connection.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   COALESCE(SUM(status IN (
+                       'complete', 'request_error', 'parse_error',
+                       'over_limit', 'no_valid_tests'
+                   )), 0) AS terminal
+            FROM package_runs WHERE policy = ?
+            """,
+            (policy,),
+        ).fetchone()
+        package_rollout_complete = (
+            package_runs["total"] == len(problems)
+            and package_runs["terminal"] == len(problems)
+        )
+    else:
+        expected_generations = sum(
+            _budget(json.loads(problem["metadata_json"]), manifest)
+            for problem in problems
+        )
     candidate_count = store.connection.execute(
         "SELECT COUNT(*) FROM ccplus_candidates WHERE policy = ?", (policy,)
     ).fetchone()[0]
@@ -1457,7 +1493,8 @@ def score(store: RunStore) -> dict[str, Any]:
         usage["completion_tokens"] += completion
         usage["total_tokens"] += total
     complete = (
-        len(generation_rows) == expected_generations
+        package_rollout_complete
+        and len(generation_rows) == expected_generations
         and not any(row["status"] == "request_error" for row in generation_rows)
         and candidate_count == expected_generations
         and pending_candidates == 0

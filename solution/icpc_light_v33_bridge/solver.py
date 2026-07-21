@@ -31,6 +31,8 @@ from solution.api import (
     SolverTurn,
     TestCaseCandidate,
     TestCaseFormat,
+    TestPackageCandidate,
+    TestPackageInput,
 )
 
 
@@ -586,12 +588,48 @@ class _BridgeSession:
                     f"{label} candidate format is unsupported"
                 ) from exc
             candidate = TestCaseCandidate(content, candidate_format)
+        elif self.task == "test_package":
+            if set(candidate_raw) != {"kind", "tests", "artifact"}:
+                raise BridgeProtocolError("test package candidate fields are invalid")
+            if candidate_raw.get("kind") != "test_package":
+                raise BridgeProtocolError("bridge returned the wrong package kind")
+            tests = candidate_raw.get("tests")
+            artifact = candidate_raw.get("artifact")
+            if not isinstance(tests, list) or not 1 <= len(tests) <= 50:
+                raise BridgeProtocolError("test package must contain 1 to 50 tests")
+            if not isinstance(artifact, Mapping):
+                raise BridgeProtocolError("test package artifact must be an object")
+            paths = []
+            candidates = []
+            for index, item in enumerate(tests):
+                if not isinstance(item, Mapping) or set(item) != {"path", "content"}:
+                    raise BridgeProtocolError(f"test package item {index} is invalid")
+                paths.append(_candidate_text(item.get("path"), "test path"))
+                candidates.append(
+                    TestCaseCandidate(
+                        _candidate_text(item.get("content"), "test input"),
+                        TestCaseFormat.RAW_INPUT,
+                    )
+                )
+            candidate = TestPackageCandidate(
+                tuple(candidates),
+                {**dict(artifact), "release_test_paths": paths},
+            )
         else:
             raise BridgeProtocolError(f"unsupported bridge task: {self.task}")
 
-        if hashlib.sha256(
-            _candidate_text(candidate_raw.get("content"), "candidate").encode("utf-8")
-        ).hexdigest() != identity.get("candidate_sha256"):
+        candidate_bytes = (
+            json.dumps(
+                candidate_raw,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            if self.task == "test_package"
+            else _candidate_text(candidate_raw.get("content"), "candidate").encode("utf-8")
+        )
+        if hashlib.sha256(candidate_bytes).hexdigest() != identity.get("candidate_sha256"):
             raise BridgeProtocolError("bridge candidate does not match its pipeline identity")
 
         return SolverTurn(
@@ -604,7 +642,7 @@ class _BridgeSession:
 
 
 class ICLightBridgeSolver:
-    """One-shot public-only generation and adversarial-test adapter."""
+    """Public-only bridge for legacy slices and the full package workflow."""
 
     capabilities = SolverCapabilities(
         generation=True,
@@ -615,6 +653,7 @@ class ICLightBridgeSolver:
         repair_feedback=False,
         fault_coverage=True,
         fault_exposure=True,
+        test_package=True,
     )
 
     def __init__(self, model: str):
@@ -677,6 +716,23 @@ class ICLightBridgeSolver:
                     "problem_id": task.problem_id,
                     "problem_statement": task.problem_statement,
                     "metadata": _public_metadata(task.metadata),
+                },
+            },
+            expected_config_binding=self._expected_config_binding,
+        )
+
+    def start_test_package(self, task: TestPackageInput) -> _BridgeSession:
+        return _BridgeSession(
+            "test_package",
+            {
+                "schema_version": 1,
+                "task": "test_package",
+                "model": self.model,
+                "reasoning_effort": ICPC_LIGHT_REASONING_EFFORT,
+                "input": {
+                    "problem_id": task.problem_id,
+                    "problem_statement": task.problem_statement,
+                    "metadata": {},
                 },
             },
             expected_config_binding=self._expected_config_binding,

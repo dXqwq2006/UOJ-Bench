@@ -26,7 +26,7 @@ LLM lanes are already VM-isolated.
 - `VERSION`, `CHANGELOG.md`, and `MIGRATION.md`: bundle identity, release notes,
   production dependencies, and side-by-side migration guidance.
 
-All agent work must use exactly `gpt-5.6-sol` with reasoning effort `ultra`.
+All agent work must use exactly `gpt-5.6-sol` with reasoning effort `xhigh`.
 The launchers record and verify that pair; another model or a fallback does not
 satisfy a production gate.
 

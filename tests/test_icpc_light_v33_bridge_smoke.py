@@ -43,7 +43,10 @@ class EndToEndSmokeTests(unittest.TestCase):
             self.assertEqual(report["fault_coverage"]["candidate_format"], "raw_input")
             self.assertTrue(report["fault_exposure"]["passed"])
             self.assertEqual(report["fault_exposure"]["candidate_format"], "raw_input")
-            self.assertEqual(report["isolation"]["job_count"], 5)
+            self.assertTrue(report["test_package"]["passed"])
+            self.assertEqual(report["test_package"]["test_count"], 2)
+            self.assertEqual(len(report["test_package"]["release_test_paths"]), 2)
+            self.assertEqual(report["isolation"]["job_count"], 6)
             self.assertFalse(report["isolation"]["model_called"])
             self.assertFalse(report["isolation"]["uoj_called"])
 

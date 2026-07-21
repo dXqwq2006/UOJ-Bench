@@ -19,7 +19,7 @@ from typing import Any
 MODEL = "gpt-5.6-sol"
 # The frozen v3.3 script fixtures validate their upstream release metadata.
 # Production model calls are independently frozen to xhigh by the bridge.
-EFFORT = "ultra"
+EFFORT = "xhigh"
 
 
 def _sha256_file(path: Path) -> str:
@@ -252,12 +252,45 @@ def _adversarial(workspace: Path, worker: Path, task: str) -> dict[str, Any]:
     return {**receipt, "receipt_sha256": _sha256_file(stage / "receipt.json")}
 
 
+def _package(workspace: Path) -> dict[str, Any]:
+    started = time.monotonic()
+    statement = workspace / "surface" / "statement.md"
+    shutil.copy2(statement, workspace / "statement.md", follow_symlinks=False)
+    audit = workspace / "audit"
+    tests = workspace / "package" / "tests"
+    audit.mkdir()
+    tests.mkdir(parents=True)
+    (tests / "edge.in").write_text("-7 4\n", encoding="utf-8")
+    (tests / "basic.in").write_text("2 3\n", encoding="utf-8")
+    _write_json(
+        audit / "regression-plan.json",
+        {
+            "release_tests": [
+                {"input": "package/tests/edge.in"},
+                {"input": "package/tests/basic.in"},
+            ]
+        },
+    )
+    (audit / "readiness.md").write_text(
+        "# Deterministic readiness\n\nverdict: go\n", encoding="utf-8"
+    )
+    return {
+        "schema_version": 1,
+        "execution_mode": "test-override-statement-only-package",
+        "release_test_count": 2,
+        "statement_sha256": _sha256_file(statement),
+        "regression_plan_sha256": _sha256_file(audit / "regression-plan.json"),
+        "readiness_sha256": _sha256_file(audit / "readiness.md"),
+        "duration_seconds": round(time.monotonic() - started, 3),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", type=Path, required=True)
     parser.add_argument(
         "--task",
-        choices=("generation", "hacking", "fault_coverage", "fault_exposure"),
+        choices=("generation", "hacking", "fault_coverage", "fault_exposure", "test_package"),
         required=True,
     )
     parser.add_argument("--workspace", type=Path, required=True)
@@ -272,6 +305,8 @@ def main() -> int:
     detail = (
         _generation(workspace, worker)
         if args.task == "generation"
+        else _package(workspace)
+        if args.task == "test_package"
         else _adversarial(workspace, worker, args.task)
     )
     result = {

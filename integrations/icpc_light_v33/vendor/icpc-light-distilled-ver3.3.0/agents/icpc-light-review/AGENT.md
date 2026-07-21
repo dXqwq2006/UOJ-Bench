@@ -8,7 +8,7 @@ description: Freeze the problem contract and perform the formal three-level prec
 ## Execution Contract
 
 Run every fresh review context through the production stage runner with
-`gpt-5.6-sol` and reasoning effort `ultra`; do not spawn unreceipted nested
+`gpt-5.6-sol` and reasoning effort `xhigh`; do not spawn unreceipted nested
 agents. Do not emit a grade, frozen contract, or solution
 handoff while its prerequisite gate or required artifact is incomplete. Return
 the same stage for rerun, or report an explicit stop/escalation; never forward

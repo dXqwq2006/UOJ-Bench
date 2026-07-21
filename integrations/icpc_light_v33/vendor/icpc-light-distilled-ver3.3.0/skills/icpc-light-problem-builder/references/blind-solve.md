@@ -16,7 +16,7 @@ summary handoff.
 
 ## Build the Plan
 
-Require the exact model `gpt-5.6-sol` with reasoning effort `ultra`. Check that
+Require the exact model `gpt-5.6-sol` with reasoning effort `xhigh`. Check that
 pair on the local Codex surface, record it in `audit/run-state.md`, and stop with
 failure if it is unavailable. Do not fall back or interpret "latest" as an
 acceptable substitute. Set `MODEL=gpt-5.6-sol` for the commands below.
@@ -27,7 +27,7 @@ Resolve the planner from the current skill root and quote paths:
 python3 "$SKILL_ROOT/scripts/build_sweep.py" \
   --problem-dir "$PROBLEM_DIR" \
   --model "$MODEL" \
-  --reasoning-effort ultra \
+  --reasoning-effort xhigh \
   --phase initial \
   --wave 1 \
   --neutral-count 2 \
@@ -223,7 +223,7 @@ python3 "$SKILL_ROOT/scripts/run_blind_review.py" \
   --review-id review-neutral-01 \
   --reviewer-id independent-review-01 \
   --model "$MODEL" \
-  --reasoning-effort ultra
+  --reasoning-effort xhigh
 ```
 
 Inspect the compact report and the printed review object. On a successful
@@ -257,7 +257,7 @@ each with `run_sweep.py`, for example:
 python3 "$SKILL_ROOT/scripts/build_sweep.py" \
   --problem-dir "$PROBLEM_DIR" \
   --model "$MODEL" \
-  --reasoning-effort ultra \
+  --reasoning-effort xhigh \
   --phase focused-neutral \
   --wave 2
 

@@ -8,7 +8,7 @@ description: Coordinate the schema-v2 preclassified ICPC Light workflow through 
 ## Execution Contract
 
 Run this agent and every delegated stage agent with `gpt-5.6-sol` and reasoning
-effort `ultra`. Never fall back. Keep the parent active, wait for delegated
+effort `xhigh`. Never fall back. Keep the parent active, wait for delegated
 work, inspect its required artifacts and executable gate, and redispatch the
 same stage when it is incomplete. If a hard stop is reached, report failure and
 stop downstream dispatch instead of accepting partial work.

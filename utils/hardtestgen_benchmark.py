@@ -9,20 +9,25 @@ import json
 import time
 
 from solution.hardtestgen import UPSTREAM_COMMIT
-from solution.hardtestgen.api import (
-    HardTestGenInput,
-    KitStage,
-    OracleProgram,
-    SuiteResult,
-    TestCase,
-    TestCaseKit,
+from solution.hardtestgen.api import HardTestGenInput, KitStage, SuiteResult, TestCaseKit
+from solution.hardtestgen.pipeline import HardTestGenPipeline
+from utils.test_package_benchmark import (
+    MAX_PACKAGE_TESTS,
+    bind_package_contract,
+    package_progress,
+    publish_package,
+    save_package_call,
 )
-from solution.hardtestgen.pipeline import HardTestGenPipeline, project_test_cases
-from utils.testcase_eval_benchmark import RunStore, _json, _usage_numbers, effective_model_request
+from utils.testcase_eval_benchmark import (
+    RunStore,
+    _json,
+    _usage_numbers,
+    effective_model_request,
+)
 
 
 POLICY = "hardtestgen"
-DEFAULT_PROJECTION_BUDGET = 20
+FIDELITY = "adapted"
 
 
 def _create_schema(store: RunStore) -> None:
@@ -68,53 +73,13 @@ def benchmark_kind(store: RunStore) -> str:
     raise RuntimeError("database is not a prepared TestCase-Eval or CodeContests+ run")
 
 
-def _supported_language(benchmark: str, language: str) -> bool:
-    compact = language.lower().replace(" ", "")
-    if benchmark == "codecontests-plus":
-        return language.upper() in {"CPP", "PY3"}
-    return language.startswith("C++") or compact in {
-        "python3", "pypy3", "pypy3-64"
-    }
-
-
 def problem_inputs(store: RunStore) -> list[HardTestGenInput]:
-    benchmark = benchmark_kind(store)
-    dataset_name = (
-        "codecontests_plus_verified" if benchmark == "codecontests-plus"
-        else "submission_all"
-    )
-    tasks = []
-    for problem in store.connection.execute(
-        "SELECT problem_id, statement, metadata_json FROM problems ORDER BY problem_id"
-    ):
-        oracles = []
-        rows = store.connection.execute(
-            """
-            SELECT submission_id, language, source
-            FROM submissions
-            WHERE dataset_name = ? AND problem_id = ?
-              AND submission_type = 'right_submission'
-            ORDER BY submission_id
-            """,
-            (dataset_name, problem["problem_id"]),
+    return [
+        HardTestGenInput(row["problem_id"], row["statement"])
+        for row in store.connection.execute(
+            "SELECT problem_id, statement FROM problems ORDER BY problem_id"
         )
-        for row in rows:
-            if not _supported_language(benchmark, row["language"]):
-                continue
-            oracles.append(
-                OracleProgram(row["submission_id"], row["language"], row["source"])
-            )
-            if len(oracles) == 5:
-                break
-        tasks.append(
-            HardTestGenInput(
-                problem["problem_id"],
-                problem["statement"],
-                tuple(oracles),
-                json.loads(problem["metadata_json"]),
-            )
-        )
-    return tasks
+    ]
 
 
 def _kit_from_json(value: str) -> TestCaseKit:
@@ -185,6 +150,19 @@ def _save_stage(store, task, model, stage_name, result) -> str:
         ),
     )
     store.connection.commit()
+    save_package_call(
+        store,
+        policy=POLICY,
+        problem_id=task.problem_id,
+        call_id=0 if stage_name == "iv_and_ojf" else 1,
+        stage=stage_name,
+        prompt=stage.prompt if stage is not None else "",
+        raw_text=stage.raw_text if stage is not None else "",
+        message=stage.message if stage is not None else {},
+        usage=stage.usage if stage is not None else {},
+        status=status,
+        error=error,
+    )
     return status
 
 
@@ -193,28 +171,36 @@ def generate_kits(
     *,
     model: str,
     workers: int,
-    projection_budget: int = DEFAULT_PROJECTION_BUDGET,
     retry_errors: bool = False,
     pipeline_factory=HardTestGenPipeline,
 ) -> dict[str, int]:
     if workers < 1:
         raise ValueError("workers must be positive")
-    if projection_budget < 1:
-        raise ValueError("projection_budget must be positive")
     _create_schema(store)
+    bind_package_contract(
+        store,
+        policy=POLICY,
+        dataset=benchmark_kind(store),
+        fidelity=FIDELITY,
+        call_contract="two sequential LLM stages, then sandboxed suite materialization",
+        deltas=(
+            "reference program removed from both paper prompts",
+            "hidden benchmark jury replaces paper oracle consensus",
+            "full ordered suite replaces 20-test category projection",
+        ),
+    )
     store.bind_manifest(
         {
             "model": model,
             "policies": [POLICY],
             "tasks": [1],
-            "task1_generations": projection_budget,
             "hardtestgen": {
                 "upstream_commit": UPSTREAM_COMMIT,
                 "llm_calls_per_problem": 2,
-                "max_oracles": 5,
-                "min_output_agreements": 2,
-                "projection": "category-round-robin",
-                "projection_budget": projection_budget,
+                "competitor_input": "statement_only",
+                "suite_projection": None,
+                "max_final_tests": MAX_PACKAGE_TESTS,
+                "overflow": "reject_package",
                 "stable_deduplication": True,
             },
             "model_request": effective_model_request(),
@@ -223,8 +209,6 @@ def generate_kits(
     tasks = problem_inputs(store)
     pending_first = []
     for task in tasks:
-        if not task.oracle_programs:
-            continue
         row = store.connection.execute(
             "SELECT status FROM hardtestgen_calls WHERE problem_id = ? AND stage = ?",
             (task.problem_id, "iv_and_ojf"),
@@ -238,7 +222,6 @@ def generate_kits(
         "complete": 0,
         "request_error": 0,
         "response_error": 0,
-        "no_oracle": 0,
     }
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -277,38 +260,34 @@ def generate_kits(
         status = "complete"
         error = ""
         kit = None
-        if not task.oracle_programs:
-            status = "no_oracle"
-            error = "no supported correct program"
-        else:
-            stages = {
-                row["stage"]: row
-                for row in store.connection.execute(
-                    "SELECT * FROM hardtestgen_calls WHERE problem_id = ?",
-                    (task.problem_id,),
-                )
-            }
-            first = stages.get("iv_and_ojf")
-            second = stages.get("input_generation")
-            failed = next(
-                (row for row in (first, second) if row is not None and row["status"] != "complete"),
-                None,
+        stages = {
+            row["stage"]: row
+            for row in store.connection.execute(
+                "SELECT * FROM hardtestgen_calls WHERE problem_id = ?",
+                (task.problem_id,),
             )
-            if failed is not None:
-                status = failed["status"]
-                error = failed["error"]
-            elif first is None or second is None:
-                status = "request_error"
-                error = "missing HardTestGen call checkpoint"
-            else:
-                try:
-                    kit = pipeline_factory(model).assemble_kit(
-                        _stage_from_json(first["stage_json"]),
-                        _stage_from_json(second["stage_json"]),
-                    )
-                except Exception as exc:
-                    status = "response_error"
-                    error = f"{type(exc).__name__}: {exc}"
+        }
+        first = stages.get("iv_and_ojf")
+        second = stages.get("input_generation")
+        failed = next(
+            (row for row in (first, second) if row is not None and row["status"] != "complete"),
+            None,
+        )
+        if failed is not None:
+            status = failed["status"]
+            error = failed["error"]
+        elif first is None or second is None:
+            status = "request_error"
+            error = "missing HardTestGen call checkpoint"
+        else:
+            try:
+                kit = pipeline_factory(model).assemble_kit(
+                    _stage_from_json(first["stage_json"]),
+                    _stage_from_json(second["stage_json"]),
+                )
+            except Exception as exc:
+                status = "response_error"
+                error = f"{type(exc).__name__}: {exc}"
         store.connection.execute(
             "INSERT OR REPLACE INTO hardtestgen_kits VALUES (?, ?, ?, ?, ?, ?)",
             (
@@ -339,58 +318,34 @@ def _generate_suite(
     return task, result
 
 
-def _publish_projection(
+def _publish_suite(
     store: RunStore,
     task: HardTestGenInput,
     result: SuiteResult,
-    budget: int,
-) -> None:
-    downstream = store.connection.execute(
-        """
-        SELECT
-          (SELECT COUNT(*) FROM materializations WHERE policy = ? AND problem_id = ?)
-          + (SELECT COUNT(*) FROM executions WHERE policy = ? AND problem_id = ?)
-        """,
-        (POLICY, task.problem_id, POLICY, task.problem_id),
-    ).fetchone()[0]
-    existing = store.connection.execute(
-        "SELECT COUNT(*) FROM generations WHERE policy = ? AND problem_id = ?",
-        (POLICY, task.problem_id),
-    ).fetchone()[0]
-    if existing and downstream:
-        raise RuntimeError(
-            f"cannot replace {task.problem_id}: projected tests were already judged"
-        )
-    projected = project_test_cases(result.test_cases, budget) if result.test_cases else []
-    store.connection.execute(
-        "DELETE FROM generations WHERE policy = ? AND problem_id = ?",
-        (POLICY, task.problem_id),
-    )
-    for generation_id in range(budget):
-        test_case = projected[generation_id] if generation_id < len(projected) else None
-        candidate = test_case.input if test_case is not None else "ERROR"
-        error = "" if test_case is not None else result.error or result.status
-        store.save_generation(
+) -> str:
+    status = {
+        "complete": "complete",
+        "test_count_limit_exceeded": "over_limit",
+        "input_generation_failed": "no_valid_tests",
+    }.get(result.status, "parse_error")
+    return publish_package(
+        store,
+        policy=POLICY,
+        problem_id=task.problem_id,
+        tests=(
             {
-                "policy": POLICY,
-                "task": 1,
-                "problem_id": task.problem_id,
-                "submission_id": "",
-                "generation_id": generation_id,
-                "prompt": "HardTestGen suite projection; see hardtestgen_kits",
-                "raw_text": "",
-                "candidate": candidate,
-                "candidate_format": "raw_input",
-                "message": {
-                    "suite_status": result.status,
-                    "method": test_case.method if test_case else None,
-                    "generator": test_case.generator if test_case else None,
-                },
-                "usage": {},
-                "status": "complete",
-                "error": error,
+                "content": test_case.input,
+                "method": test_case.method,
+                "source_path": test_case.generator,
             }
-        )
+            for test_case in result.test_cases
+        ),
+        fidelity=FIDELITY,
+        status=status,
+        declared_test_count=len(result.generated_inputs),
+        artifact={"suite_status": result.status},
+        error=result.error,
+    )
 
 
 def generate_suites(
@@ -398,13 +353,10 @@ def generate_suites(
     *,
     executor,
     workers: int,
-    projection_budget: int = DEFAULT_PROJECTION_BUDGET,
     retry_errors: bool = False,
 ) -> dict[str, int]:
     if workers < 1:
         raise ValueError("workers must be positive")
-    if projection_budget < 1:
-        raise ValueError("projection_budget must be positive")
     _create_schema(store)
     tasks = {task.problem_id: task for task in problem_inputs(store)}
     kit_problem_ids = {
@@ -455,9 +407,9 @@ def generate_suites(
                 time.time(),
             ),
         )
-        _publish_projection(store, task, result, projection_budget)
+        package_status = _publish_suite(store, task, result)
         store.connection.commit()
-        counts[result.status] = counts.get(result.status, 0) + 1
+        counts[package_status] = counts.get(package_status, 0) + 1
     return counts
 
 
@@ -499,9 +451,7 @@ def pipeline_summary(store: RunStore) -> dict[str, Any]:
         "full_test_cases": full_test_cases,
         "generated_inputs": generated_inputs,
         "methods": methods,
-        "projected_generations": store.connection.execute(
-            "SELECT COUNT(*) FROM generations WHERE policy = ?", (POLICY,)
-        ).fetchone()[0],
+        "package": package_progress(store, POLICY),
         "usage": {
             "prompt_tokens": prompt,
             "completion_tokens": completion,

@@ -7,7 +7,7 @@ description: Independently audit a preclassified ICPC Light package and return a
 
 ## Execution Contract
 
-Run this independent entry with `gpt-5.6-sol` and reasoning effort `ultra`.
+Run this independent entry with `gpt-5.6-sol` and reasoning effort `xhigh`.
 Inspect receipts and execute the final verifier; do not infer completion from a
 child message or file name. Any missing, stale, partial, or failed prerequisite
 forbids `go` and must be routed to its owner or reported as escalation.
