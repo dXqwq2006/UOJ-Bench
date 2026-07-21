@@ -466,7 +466,11 @@ class SolverAdapterTests(unittest.TestCase):
                 "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": "p",
-                    "problem_statement": "PUBLIC STATEMENT",
+                    "problem_statement": (
+                        "Time limit: 2000 ms\n"
+                        "Memory limit: 256 MB\n"
+                        "PUBLIC STATEMENT"
+                    ),
                     "metadata": {},
                 },
             }
@@ -481,7 +485,13 @@ class SolverAdapterTests(unittest.TestCase):
                 require_solver_support(solver, "test_package")
                 session = solver.start_test_package(
                     TestPackageInput(
-                        "p", "PUBLIC STATEMENT", {"accepted_source": "SECRET"}
+                        "p",
+                        "PUBLIC STATEMENT",
+                        {
+                            "accepted_source": "SECRET",
+                            "time_limit_ms": 2000,
+                            "memory_limit_mb": 256,
+                        },
                     )
                 )
                 self.assertEqual(session.initial_request, expected_request)
@@ -495,6 +505,33 @@ class SolverAdapterTests(unittest.TestCase):
             turn.candidate.artifact["release_test_paths"],
             ["package/tests/02.in", "package/tests/01.in"],
         )
+
+
+    def test_package_normalizes_upstream_resource_labels_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, _ = fake_adapter_config(root)
+            with patch.dict(os.environ, {BRIDGE_CONFIG_ENV: str(config)}):
+                solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
+            original = (
+                "Title: A\n"
+                "time_limit_ms: 1500\n"
+                "memory_limit_mb: 512\n"
+                "Description: unchanged"
+            )
+            request = solver.start_test_package(
+                TestPackageInput("p", original, {})
+            ).initial_request
+        self.assertEqual(
+            request["input"]["problem_statement"],
+            (
+                "Title: A\n"
+                "Time limit: 1500 ms\n"
+                "Memory limit: 512 MB\n"
+                "Description: unchanged"
+            ),
+        )
+        self.assertEqual(request["input"]["metadata"], {})
 
     def test_wrong_model_and_bridge_failures_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires model"):
@@ -844,6 +881,15 @@ class BridgeRuntimeTests(unittest.TestCase):
                 self.skipTest("hard links are unavailable on this filesystem")
             with self.assertRaisesRegex(BridgeContractError, "hard-linked"):
                 _tree_sha256(root)
+
+    def test_tree_hash_allows_empty_only_when_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaisesRegex(BridgeContractError, "empty"):
+                _tree_sha256(root)
+            digest, files, total = _tree_sha256(root, allow_empty=True)
+            self.assertEqual(digest, hashlib.sha256(b"").hexdigest())
+            self.assertEqual((files, total), (0, 0))
 
 
 if __name__ == "__main__":

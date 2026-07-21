@@ -288,11 +288,11 @@ def _run_container(container_id: str, timeout: float) -> tuple[int, bytes, bytes
     return int(process.returncode or 0), stdout, stderr
 
 
-def _regular_tree(path: Path, label: str) -> str:
+def _regular_tree(path: Path, label: str, *, allow_empty: bool = False) -> str:
     try:
-        digest, _, _ = _tree_sha256(path)
+        digest, _, _ = _tree_sha256(path, allow_empty=allow_empty)
     except Exception as exc:
-        raise SchedulerError(f"{label} is not a safe regular tree") from exc
+        raise SchedulerError(f"{label} is not a safe regular tree: {exc}") from exc
     return digest
 
 
@@ -385,7 +385,9 @@ def _export_result(container_id: str, workspace: Path) -> dict[str, str]:
             workspace / "skills", "host skill bundle"
         ):
             raise SchedulerError("agent changed the skill bundle")
-        output_sha = _regular_tree(returned / "output", "returned output")
+        output_sha = _regular_tree(
+            returned / "output", "returned output", allow_empty=True
+        )
         result = returned / "control" / "agent-result.json"
         metadata = result.lstat()
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:

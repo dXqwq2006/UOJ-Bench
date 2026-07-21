@@ -3,12 +3,14 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from utils.codecontests_plus import DATASET_KEY, _create_ccplus_schema, score as cc_score
 from utils.test_package_benchmark import (
     bind_package_contract,
     package_metrics,
     publish_package,
+    run_solver_packages,
     sync_generation_package,
 )
 from utils.testcase_eval_benchmark import RunStore, score as tce_score
@@ -22,6 +24,72 @@ class TestPackageBenchmarkTests(unittest.TestCase):
         )
         store.connection.commit()
         return store
+
+    def test_package_runner_forwards_only_public_resource_metadata(self):
+        from solution.api import (
+            SolverCapabilities,
+            SolverTurn,
+            TestCaseCandidate,
+            TestPackageCandidate,
+        )
+
+        seen = []
+
+        class Session:
+            initial_request = {"public": True}
+
+            def next(self):
+                return SolverTurn(
+                    candidate=TestPackageCandidate(
+                        tests=(TestCaseCandidate("1\n"),),
+                        artifact={"release_test_paths": ["package/tests/01.in"]},
+                    ),
+                    raw_text="",
+                    message={},
+                    usage={},
+                )
+
+        class Solver:
+            capabilities = SolverCapabilities(test_package=True)
+
+            def start_test_package(self, task):
+                seen.append(task)
+                return Session()
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self._store(directory) as store:
+                store.connection.execute(
+                    "UPDATE problems SET metadata_json = ? WHERE problem_id = ?",
+                    (
+                        json.dumps({
+                            "time_limit_ms": 2000,
+                            "memory_limit_mb": 256,
+                            "validator": "HIDDEN",
+                        }),
+                        "p",
+                    ),
+                )
+                store.connection.commit()
+                with patch("solution.load_solver", return_value=Solver()):
+                    result = run_solver_packages(
+                        store,
+                        policy="solver",
+                        model="model",
+                        dataset="testcase-eval",
+                        fidelity="adapted",
+                        call_contract="package",
+                        workers=1,
+                    )
+
+        self.assertEqual(result["complete"], 1)
+        self.assertEqual(
+            seen[0].metadata,
+            {
+                "benchmark": "testcase-eval",
+                "time_limit_ms": 2000,
+                "memory_limit_mb": 256,
+            },
+        )
 
     def test_publish_mirrors_ordered_inputs_to_hidden_jury_schema(self):
         with tempfile.TemporaryDirectory() as directory:

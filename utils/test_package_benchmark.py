@@ -399,22 +399,30 @@ def run_solver_packages(
     store.bind_manifest({"model": model, "policies": [policy], "tasks": [1]})
     jobs = []
     for row in store.connection.execute(
-        "SELECT problem_id, statement FROM problems ORDER BY problem_id"
+        "SELECT problem_id, statement, metadata_json FROM problems ORDER BY problem_id"
     ):
         existing = store.connection.execute(
             "SELECT status FROM package_runs WHERE policy = ? AND problem_id = ?",
             (policy, row["problem_id"]),
         ).fetchone()
         if existing is None or (retry_errors and existing["status"] != "complete"):
-            jobs.append((row["problem_id"], row["statement"]))
+            problem_metadata = json.loads(row["metadata_json"])
+            public_metadata = {"benchmark": dataset}
+            for key in ("time_limit_ms", "memory_limit_mb"):
+                value = problem_metadata.get(key)
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+                    public_metadata[key] = value
+            jobs.append((row["problem_id"], row["statement"], public_metadata))
 
-    def generate(problem_id: str, statement: str) -> dict[str, Any]:
+    def generate(
+        problem_id: str, statement: str, metadata: Mapping[str, Any]
+    ) -> dict[str, Any]:
         prompt: Any = ""
         try:
             solver = load_solver(policy, model)
             require_solver_support(solver, "test_package")
             session = solver.start_test_package(
-                TestPackageInput(problem_id, statement, {"benchmark": dataset})
+                TestPackageInput(problem_id, statement, metadata)
             )
             prompt = session.initial_request
             turn = session.next()
@@ -477,8 +485,8 @@ def run_solver_packages(
     }
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = [
-            pool.submit(generate, problem_id, statement)
-            for problem_id, statement in jobs
+            pool.submit(generate, problem_id, statement, metadata)
+            for problem_id, statement, metadata in jobs
         ]
         for future in as_completed(futures):
             record = future.result()

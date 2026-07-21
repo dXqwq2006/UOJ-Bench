@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import threading
@@ -65,6 +66,26 @@ PUBLIC_METADATA_FIELDS = frozenset(
 _BINDING_LOCK = threading.Lock()
 _FROZEN_CONFIG_BINDING: tuple[str, str] | None = None
 _FROZEN_PIPELINE_SIGNATURE: str | None = None
+
+
+def _test_package_statement(task: TestPackageInput) -> str:
+    statement = task.problem_statement
+    missing = []
+    for key, label, unit in (
+        ("time_limit_ms", "Time limit", "ms"),
+        ("memory_limit_mb", "Memory limit", "MB"),
+    ):
+        pattern = re.compile(rf"(?m)^{key}:\s*([0-9]+)\s*$")
+        match = pattern.search(statement)
+        if match is not None:
+            statement = pattern.sub(
+                f"{label}: {match.group(1)} {unit}", statement, count=1
+            )
+            continue
+        value = task.metadata.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            missing.append(f"{label}: {value} {unit}")
+    return "\n".join((*missing, statement))
 
 
 class BridgeProtocolError(RuntimeError):
@@ -731,7 +752,7 @@ class ICLightBridgeSolver:
                 "reasoning_effort": ICPC_LIGHT_REASONING_EFFORT,
                 "input": {
                     "problem_id": task.problem_id,
-                    "problem_statement": task.problem_statement,
+                    "problem_statement": _test_package_statement(task),
                     "metadata": {},
                 },
             },

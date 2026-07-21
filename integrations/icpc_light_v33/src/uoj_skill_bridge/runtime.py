@@ -181,7 +181,7 @@ def _absolute_file(value: Any, label: str, *, executable: bool = False) -> Path:
     return resolved
 
 
-def _tree_sha256(root: Path) -> tuple[str, int, int]:
+def _tree_sha256(root: Path, *, allow_empty: bool = False) -> tuple[str, int, int]:
     if root.is_symlink() or not root.is_dir():
         raise BridgeContractError("hashed tree root must be a non-symlink directory")
     digest = hashlib.sha256()
@@ -246,7 +246,7 @@ def _tree_sha256(root: Path) -> tuple[str, int, int]:
                 )
         finally:
             os.close(descriptor)
-    if files == 0:
+    if files == 0 and not allow_empty:
         raise BridgeContractError("skill tree is empty")
     return digest.hexdigest(), files, total
 
