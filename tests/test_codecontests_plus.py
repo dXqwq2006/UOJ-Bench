@@ -135,6 +135,24 @@ class CodeContestsPlusDatasetTests(unittest.TestCase):
                     [2, 1, 1],
                 )
 
+    @patch("utils.codecontests_plus._request_json")
+    def test_omitted_lightcp_result_is_retried(self, request):
+        request.side_effect = [
+            {"results": [{"id": "0"}]},
+            {"results": [{"id": "1"}]},
+        ]
+
+        results = _batch_results(
+            "http://judge",
+            {"tests": [{"id": "0"}, {"id": "1"}]},
+        )
+
+        self.assertEqual(sorted(results), ["0", "1"])
+        self.assertEqual(
+            [len(call.args[2]["tests"]) for call in request.call_args_list],
+            [2, 1],
+        )
+
     def test_supported_compiler_profiles_are_explicit(self):
         self.assertEqual(COMPILER_PROFILES["CPP"], ("cpp-gnu++17",))
         self.assertEqual(COMPILER_PROFILES["PY2"], ("python2",))
