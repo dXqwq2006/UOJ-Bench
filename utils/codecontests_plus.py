@@ -882,21 +882,24 @@ def populate_oracles(
     pending = []
     for program in store.connection.execute(
         """
+        WITH reference_programs AS (
+            SELECT s.problem_id, MIN(s.submission_id) AS submission_id
+            FROM submissions AS s
+            JOIN ccplus_program_audits AS a USING(submission_id)
+            WHERE s.dataset_name = ?
+              AND s.submission_type = 'right_submission'
+              AND a.status = 'complete'
+            GROUP BY s.problem_id
+        )
         SELECT s.*, p.metadata_json AS problem_metadata_json, a.compiler_profile
-        FROM submissions AS s
+        FROM reference_programs AS r
+        JOIN submissions AS s
+          ON s.dataset_name = ? AND s.submission_id = r.submission_id
         JOIN problems AS p USING(problem_id)
         JOIN ccplus_program_audits AS a USING(submission_id)
-        WHERE s.submission_type = 'right_submission' AND a.status = 'complete'
-          AND s.submission_id = (
-              SELECT MIN(s2.submission_id)
-              FROM submissions AS s2
-              JOIN ccplus_program_audits AS a2 USING(submission_id)
-              WHERE s2.problem_id = s.problem_id
-                AND s2.submission_type = 'right_submission'
-                AND a2.status = 'complete'
-          )
         ORDER BY s.problem_id
-        """
+        """,
+        (DATASET_KEY, DATASET_KEY),
     ):
         tests = list(
             store.connection.execute(
