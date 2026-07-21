@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import tempfile
 import threading
@@ -125,16 +126,28 @@ class TestCaseEvalLightCPTests(unittest.TestCase):
 
             lightcp = f"lightcp:testcase-eval:{'a' * 64}"
             container = f"container:sha256:{'b' * 64}"
-            bind_judge_backend(database, lightcp)
-            bind_judge_backend(database, lightcp)
+            with patch.dict(os.environ, {"UOJ_BENCH_EVALUATION_OWNER": "h100"}):
+                bind_judge_backend(database, lightcp)
+                bind_judge_backend(database, lightcp)
             connection = sqlite3.connect(database)
-            encoded = connection.execute(
-                "SELECT value_json FROM manifest WHERE key='judge_backend'"
-            ).fetchone()[0]
+            manifest = dict(
+                connection.execute("SELECT key, value_json FROM manifest")
+            )
             connection.close()
-            self.assertEqual(json.loads(encoded), lightcp)
+            self.assertEqual(json.loads(manifest["judge_backend"]), lightcp)
+            self.assertEqual(json.loads(manifest["evaluation_owner"]), "h100")
+            with self.assertRaisesRegex(RuntimeError, "evaluation owner"):
+                with patch.dict(
+                    os.environ,
+                    {"UOJ_BENCH_EVALUATION_OWNER": "pro6000"},
+                ):
+                    bind_judge_backend(database, lightcp)
             with self.assertRaisesRegex(RuntimeError, "already bound"):
-                bind_judge_backend(database, container)
+                with patch.dict(
+                    os.environ,
+                    {"UOJ_BENCH_EVALUATION_OWNER": "h100"},
+                ):
+                    bind_judge_backend(database, container)
 
 
 if __name__ == "__main__":
