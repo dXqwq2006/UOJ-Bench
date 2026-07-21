@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "bundle": "icpc-light-distilled",
+  "version": "3.3.0",
+  "release_date": "2026-07-21",
+  "generated_at_utc": "2026-07-21T00:16:00Z",
+  "cpideas_plus": {
+    "repository": "https://github.com/dXqwq2006/CPIdeas-Plus.git",
+    "branch": "judge-upd",
+    "base_commit": "656d1291e108d7f4088af5963d1d523eb9b390bb",
+    "integration_commit": "778c619799affe3c52ecd23e2984ce7d9545fed5",
+    "worktree_state": "clean at integration_commit",
+    "dataset_api_revision": "cpideas-program-dataset-v1",
+    "lightcp_api_revision": "cpideas-custom-test-batch-v3",
+    "cpp_compiler_profile": "gnu++17-O2-pipe-online-judge-I-dot-package-testlib-v4",
+    "vendor_build_id": "sha256:134bd322502f762dee2c2da5abf0b9d6c64e3b3d4055fde8ff4eb250c46db603",
+    "source_files_sha256": {
+      "docker-compose.lightcpverifier.yml": "d0f3315604c61d3fdad3a9fd7190975cfb12e4e171e17e95b6cfd5862341ab87",
+      "docs/LOCAL_JUDGING.zh-CN.md": "300303185c80fc1cbb10aab58288c9d2ab4770a1f66bf5384061cb9970d627ba",
+      "scripts/lightcpverifier-docker.sh": "d8435fa517220ca88aa00903fc2854beb2417cd14083addaca65a7450d59afc4",
+      "src/cpideas_plus/evaluation/__init__.py": "ded3d7d34f29328d95359f30b768f9d0f01a5f1086f4e89d49f431a8d6db87fa",
+      "src/cpideas_plus/evaluation/dataset.py": "677b13fb647cf33f10cc04ccb678f71fda8d4db09f16a8d688cc4b8e81f2945c",
+      "src/cpideas_plus/evaluation/execution.py": "154aade9b70d02a45234f6845d09004d4cc0fcfe6d653310c067c2cd25aaa491",
+      "src/cpideas_plus/evaluation/local_runtime.py": "254ce08a1915ab60a36feb141f3e21512771b32a5d8f2b8a03708875fd1df5aa",
+      "src/cpideas_plus/evaluation/sandbox.py": "073dced68d5d99db63ae76e1f5a7d52c9e0f7e54046e0b1835867bdecc2ef767",
+      "vendor/LightCPVerifier/Dockerfile": "9031f9bd815465fb33f6407092112dfb156f8d85ecdb131bb06105ca42dcd735",
+      "vendor/LightCPVerifier/entrypoint.sh": "d49109c9b71c5bb1cb454921cc3464985913982840667e447cfa13649baac6dd",
+      "vendor/LightCPVerifier/src/execution-policy.js": "e90603c48a5cd00c68ea69de39ba720b5dd96ede3e7165e31557d66363821f05",
+      "vendor/LightCPVerifier/src/gojudge.js": "0614c001cc28ab95c532a46b7484947445a2d8f225f354d64c9b4fe251030294",
+      "vendor/LightCPVerifier/src/router.js": "9197249a0cc58f7bd93293cb5ec57341502a2f548cd07973142fe8b1c00c5fdb"
+    }
+  },
+  "runtime_companion": {
+    "workflow_engine_version": "eight-stage-v6-live-workspace-quota-v3.3-oom-exit0-v2",
+    "source_files_sha256": {
+      "scripts/physical-blind/codex": "9f760c6bde3075112c6615b998e70148f0ed5e2e6538c3e8b37c845d656dd27d",
+      "src/skill_eval/audit.py": "69b972879066cce8279521c966490a483a59b7edb5d4159cd2b9d8ee2bf34779",
+      "src/skill_eval/cli.py": "1a4b3ac9eb415be71173db6f2854f5519486226356963efa719c3026bcaf494b",
+      "src/skill_eval/docker_runtime.py": "f46b39c83afe26710661699dedeac569d8ec8289e7b8253347edd921af29ca9e",
+      "src/skill_eval/experiment.py": "843cccd089f7aa217eb7c8bb5e023f491951e8922b23b6c7ea0f6a5a24dec07b",
+      "src/skill_eval/hidden.py": "321aa1aab1e66f8277b527c02ab841af61205bce9c10ec80dc9f2edfea105967",
+      "src/skill_eval/lightcp_backend.py": "978269939df74728c2bf35b8b3e93ad4a6a5385c83011c6b83c94e30e4a4ad62",
+      "src/skill_eval/native_stage.py": "d654f87335f36859be933dbfc1b0e0afe9962fd726c8485b49fb3d3a9cdbb14c",
+      "src/skill_eval/shortcut_review.py": "231286f04733f991a7e04396d17648e9a19fab27cb31979ca7217d615854e709",
+      "src/skill_eval/workflow.py": "c05d154eacc931dc74c7d532e2ca40f5e43bf609c2cb3bcea273e323b67fa4ce"
+    }
+  },
+  "ver3_source_files_sha256": {
+    "skills/grade-test-data-buildability/scripts/validate_report.py": "f30d6b4cb4e0c5efd2a0551b8452deb6b8e9646e647730485dbcd6db30de9f32",
+    "skills/icpc-light-problem-builder/scripts/build_resource_policy.py": "38b1d40352abd696c5bdd5bd7c66908ad35d716e71e2579b6a5db640979576b4",
+    "skills/icpc-light-problem-builder/scripts/build_sweep.py": "7e9c0706949a97f7637d4a36fd7ab079eb5f723f8c9136a325a9221e7228aac6",
+    "skills/icpc-light-problem-builder/scripts/contamination_status.py": "35e613b8b960882a37dea0496066e37745cbb6a15c3dc6fc9790617d06a77bef",
+    "skills/icpc-light-problem-builder/scripts/record_adversarial_round.py": "0f9fab0f1b104a0d849dfc21b6f83abf49d375d44bcd517cd1078dc78999d532",
+    "skills/icpc-light-problem-builder/scripts/regression_backend.py": "3e82f5b70d6bb05dbe5860ff2eb990732f05feafcc1668fa492c8892da0b657e",
+    "skills/icpc-light-problem-builder/scripts/run_blind_review.py": "6ca29e1f743590759d4a1fa207d12b5041f7c3ff08994d323b863533292843be",
+    "skills/icpc-light-problem-builder/scripts/run_regression_gate.py": "255de9ecd509c1672e31894806c7257a1245f081a0b6c3b515174cca87d3c4ad",
+    "skills/icpc-light-problem-builder/scripts/run_stage_agent.py": "8725d04d58e191d94fdc0a48a11ce5ab9369b43d3862c8c426ffd576a0bd2854",
+    "skills/icpc-light-problem-builder/scripts/run_sweep.py": "69e78e05a4e99218f9f2f2190c7126cc1a069cc62920613b4f0a15d9fdb6169f",
+    "skills/icpc-light-problem-builder/scripts/statement_resources.py": "8fb02344ce67c468ada74f1d881dc582eb2b57cfdf768107d6ea21e8d58dc842",
+    "skills/icpc-light-problem-builder/scripts/verify_adversarial_round_chain.py": "dc8407f378cff681d76b414b8dce89c381373e1a8044c8dfca8c0e38c1705bb0",
+    "skills/icpc-light-problem-builder/scripts/verify_blind_stage.py": "2c2161ead00255c245efb75754d9ea9081941ff15b6b8ba1d071b38ef305b32a",
+    "skills/icpc-light-problem-builder/scripts/verify_completion.py": "551fbcee59e91ddfcc533aec071159512d22a6a5f92a5eec9702eb083b33e760",
+    "skills/icpc-light-problem-builder/scripts/verify_completion_handoff.py": "d3d3f6fbb44e39c0ef500c0c978af8b3136e9b64941f2aba311aada3c9b1eb38",
+    "skills/icpc-light-problem-builder/scripts/verify_preclassification.py": "4d42425e242d77a010ebfaeffd2ac805d3b1c9f4a7909f01fcbdde5befd68d89",
+    "skills/icpc-light-problem-builder/scripts/verify_readiness.py": "474c0077a00db22a60f0e6298546b64c3c65213a1570adefe6abea67588ddcd3",
+    "skills/icpc-light-problem-builder/scripts/verify_solution_draft_handoff.py": "a0a9a4baee1da3661dbe8aacfc8fe2b74fc82132c3f7be3f1de79cee56b931b2",
+    "skills/icpc-light-problem-builder/scripts/verify_solution_handoff.py": "f1e68ad6a97899f75e88b8df4f2e75febac4cb126a047f0180f1dc462fb5fef6",
+    "skills/icpc-light-problem-builder/scripts/verify_statement_resources.py": "58360cbd637cfabe9c7e60beff75fc81919e7dca5a4ff272732e9faa6e765855",
+    "skills/icpc-light-problem-builder/scripts/verify_std_materialization_handoff.py": "5b2c417becfcd9481c4d7fa4b7927bd90e7efa1cfa11e6c5c8a36038796f3d11",
+    "tests/test_adversarial_round_resources.py": "0ffa273d08e686788be58e7ca1b2fabb5dfcf78474cd730a33ab66739af13260",
+    "tests/test_blind_review_status.py": "611d362a718b272cb19f12b2b9375afb4365520b8bec9af5391a9d68ab9c9636",
+    "tests/test_completion_coverage.py": "5579e00e43b1e512551cc3f3bdc1f86cdfae6ee8aac2f8c167b9b0bc7d57af10",
+    "tests/test_package_privacy.py": "9c4a17fc6a7f2f7a076754311e1f25b67676994f867e7a6698a8f14069190085",
+    "tests/test_regression_backend.py": "ad5cba03a4e07048e5ec54490d8efd679a4e2bd17327a6abc26fa74b54fb63d6",
+    "tests/test_resource_policy.py": "171213bb44178c65881508a58a075434a381516d047b37aaa63dbe301468a1bc",
+    "tests/test_stage_output_isolation.py": "3b47b97bca5d842c59ca742a6d84480a82cb7494ec9ed2a94c7f6635da128764",
+    "tests/test_standard_route_adoption.py": "0ee8095337f6b82483520340408216a5d2271c1855fa70cfcc2b05b4d6f4a7fc",
+    "tests/test_statement_resources.py": "ae75a2ee03a9483526503c79b637f5ae5d4ba936e1f646f762282dd3422d1fdb"
+  },
+  "ver2_baseline": {
+    "tree_sha256": "954177a4b8c6e075ceba9cd5be01245db702e44161e213a9e99acce6a28f5515",
+    "zip_sha256": "687397570e791bc0d840bcefe598e26126dcec648f042f6433fd485c94f9bdbe"
+  },
+  "validation": {
+    "ver3_unittest": {
+      "tests": 123,
+      "status": "passed"
+    },
+    "cpideas_dataset_unittest": {
+      "tests": 14,
+      "status": "passed"
+    },
+    "cpideas_sandbox_compatibility_unittest": {
+      "tests": 52,
+      "status": "passed"
+    },
+    "cpideas_package_local_unittest": {
+      "tests": 16,
+      "status": "passed"
+    },
+    "node_syntax": "passed",
+    "python_compile": "passed",
+    "docker_compose_config": "passed",
+    "live_docker_gojudge_e2e": false,
+    "live_docker_gojudge_e2e_reason": "Docker daemon unavailable during release validation"
+  },
+  "manifest": {
+    "path": "MANIFEST.sha256",
+    "algorithm": "SHA-256",
+    "excludes": [
+      "MANIFEST.sha256",
+      ".git/",
+      ".DS_Store",
+      "__pycache__/",
+      "*.pyc"
+    ]
+  }
+}

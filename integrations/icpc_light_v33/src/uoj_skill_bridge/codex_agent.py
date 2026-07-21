@@ -1,0 +1,185 @@
+"""Reference public-only Codex agent for Generation and Hacking task slices.
+
+Production deployment is expected to launch this inside the audited zero-mount
+agent boundary, where the credential relay configuration already exists.  It
+never reads UOJ credentials and never calls the UOJ API.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import shutil
+import subprocess
+import time
+from typing import Any
+
+from .runtime import (
+    DEFAULT_MAX_CANDIDATE_BYTES,
+    MAX_AGENT_LOG_BYTES,
+    _read_bounded_regular_file,
+    _write_json,
+)
+
+
+MODEL = "gpt-5.6-sol"
+REASONING_EFFORT = "ultra"
+
+
+def _prompt(task: str) -> str:
+    common = """Work only inside the current job workspace. Do not inspect any
+parent directory, benchmark dataset, historical result, official solution, UOJ
+page, or network resource. The only task inputs are under surface/. First read
+skills/icpc-light-problem-builder/SKILL.md and only its directly relevant
+blind-solving or adversarial-test references. Do not reveal chain of thought.
+Do not modify surface/ or skills/.
+"""
+    if task == "generation":
+        return common + """
+This is a UOJ-Bench Generation public-only blind-solve slice. Read
+surface/statement.md, solve the complete problem with a worst-case-valid
+algorithm, and write exactly one complete GNU C++20 submission to
+output/main.cpp. This task asks for a solver candidate, not a new problem or a
+full ICPC package. Do not create another file under output/.
+"""
+    return common + """
+This is a UOJ-Bench one-shot Hacking slice. Read surface/statement.md,
+surface/task.json for `submission_language`, and the exact target program in
+surface/wrong-source.txt. Find one valid complete stdin that
+makes that exact program fail the stated problem. Write exactly one artifact:
+prefer raw bytes in output/candidate.in; use output/generator.py only if a
+static input is genuinely unsuitable. Do not write or seek an accepted source,
+an answer file, or another file under output/.
+"""
+
+
+def _usage(data: bytes) -> dict[str, int]:
+    maxima = {"input_tokens": 0, "cached_input_tokens": 0, "output_tokens": 0}
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        stack: list[Any] = [event]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    if key in maxima and isinstance(child, int):
+                        maxima[key] = max(maxima[key], child)
+                    elif isinstance(child, (dict, list)):
+                        stack.append(child)
+            elif isinstance(value, list):
+                stack.extend(value)
+    maxima["total_tokens"] = maxima["input_tokens"] + maxima["output_tokens"]
+    return maxima
+
+
+def _tail(data: bytes, maximum: int = 2000) -> str:
+    return data[-maximum * 4 :].decode("utf-8", errors="replace")[-maximum:]
+
+
+def _write_result(workspace: Path, value: dict[str, Any]) -> None:
+    control = workspace / "control"
+    metadata = control.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or control.is_symlink():
+        raise RuntimeError("control must remain a regular directory")
+    _write_json(control / "agent-result.json", value)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--task", choices=("generation", "hacking"), required=True)
+    parser.add_argument("--workspace", type=Path, required=True)
+    args = parser.parse_args(argv)
+    workspace = args.workspace.resolve(strict=True)
+    codex = shutil.which("codex")
+    if codex is None:
+        _write_result(
+            workspace,
+            {
+                "schema_version": 1,
+                "status": "retryable_error",
+                "task": args.task,
+                "error": "codex executable was not found",
+                "transcript": [],
+                "usage": {},
+            },
+        )
+        return 2
+    final_path = workspace / "control" / "codex-final.txt"
+    command = [
+        codex,
+        "exec",
+        "--ephemeral",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "workspace-write",
+        "--cd",
+        str(workspace),
+        "--model",
+        MODEL,
+        "--config",
+        f'model_reasoning_effort="{REASONING_EFFORT}"',
+        "--json",
+        "--output-last-message",
+        str(final_path),
+        "-",
+    ]
+    started = time.monotonic()
+    events_path = workspace / "control" / "codex-events.jsonl"
+    stderr_path = workspace / "control" / "codex-stderr.log"
+    with events_path.open("xb") as events, stderr_path.open("xb") as stderr:
+        completed = subprocess.run(
+            command,
+            cwd=workspace,
+            input=_prompt(args.task).encode("utf-8"),
+            stdout=events,
+            stderr=stderr,
+            check=False,
+        )
+    events_data = _read_bounded_regular_file(
+        events_path, label="Codex event log", maximum=MAX_AGENT_LOG_BYTES
+    )
+    stderr_data = _read_bounded_regular_file(
+        stderr_path, label="Codex stderr log", maximum=MAX_AGENT_LOG_BYTES
+    )
+    final_data = (
+        _read_bounded_regular_file(
+            final_path,
+            label="Codex final message",
+            maximum=DEFAULT_MAX_CANDIDATE_BYTES,
+        )
+        if final_path.exists() or final_path.is_symlink()
+        else b""
+    )
+    final = final_data.decode("utf-8", errors="replace")
+    status = "completed" if completed.returncode == 0 else "retryable_error"
+    result = {
+        "schema_version": 1,
+        "status": status,
+        "task": args.task,
+        "raw_text": final,
+        "final_message": final,
+        "transcript": ([{"role": "assistant", "content": final}] if final else []),
+        "usage": _usage(events_data),
+        "codex_logs": {
+            "events_sha256": hashlib.sha256(events_data).hexdigest(),
+            "events_bytes": len(events_data),
+            "stderr_sha256": hashlib.sha256(stderr_data).hexdigest(),
+            "stderr_bytes": len(stderr_data),
+        },
+        "duration_seconds": round(time.monotonic() - started, 3),
+    }
+    if completed.returncode != 0:
+        result["error"] = _tail(stderr_data) or "codex exited nonzero"
+    _write_result(workspace, result)
+    return 0 if status == "completed" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

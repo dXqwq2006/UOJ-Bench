@@ -1,8 +1,9 @@
 # Benchmark、任务与 Solver 清单
 
-本文记录 pro6000 上本仓库 `main` 分支当前已经接入的 benchmark、任务、
-solver/competitor、评测后端和可追溯出处。状态基于 2026-07-21 的
-`fbfbaba`；运行中的样本数、费用和 ETA 属于结果目录状态，不写进这份长期清单。
+本文记录本仓库当前已经接入的 benchmark、任务、solver/competitor、评测后端和
+可追溯出处。UOJ 兼容边界固定到 `ce1c006d`，ICPC Light bridge 的 reviewed base
+固定到 `e31cc22c`；运行中的样本数、费用和 ETA 属于结果目录状态，不写进这份
+长期清单。
 
 ## 术语与边界
 
@@ -70,16 +71,30 @@ TestCase-Eval 的 accepted submissions 用于 oracle 共识，不计作要杀死
 - 技术上可经 `start_hacking` adapter 把原始输入包装成 Python generator，
   但这不构成其论文中的 UOJ-Bench 结果。
 
+### `icpc_light_v33_bridge`
+
+- 出处：仓库内 manifest/lock 固定的 ICPC Light v3.3 skill bundle 与独立 JSON
+  bridge；配置固定精确 `gpt-5.6-sol`、`reasoning_effort=ultra`。
+- 支持 UOJ Generation 和 Hacking 的 one-shot typed contract；不支持 Repair、
+  judge feedback 或 TestCase-Eval 两项任务。
+- Hacking pipeline 可以产出一个 raw input，adapter 按 UOJ-Bench 合同机械包装成
+  Python 3 generator；最终评分仍由原 UOJ evaluator 完成。
+- deterministic smoke 已覆盖 Generation 的 2 neutral + 2 deceptive sweep/blind
+  review，以及 Easy C++、Hard Python3 两条 Hacking rollout。该 smoke 注入测试
+  worker，不调用模型或 UOJ，不是 benchmark 成绩。
+- 生产环境必须使用零挂载隔离 scheduler；reference agent 不是安全边界。详见
+  [`ICPC_LIGHT_V33_BRIDGE.zh-CN.md`](ICPC_LIGHT_V33_BRIDGE.zh-CN.md)。
+
 ### 能力与可比性矩阵
 
-| Task | `prompt` | `testcase_eval` |
-| --- | --- | --- |
-| UOJ Generation | **官方 baseline** | 不支持 |
-| UOJ Hacking，单轮 | **官方 baseline** | 技术可运行；非论文对照 |
-| UOJ Hacking，agent | **官方 baseline** | 不支持反馈 |
-| UOJ Repair，单轮/agent | **官方 baseline** | 不支持 |
-| TestCase-Eval Task 1 | 不支持 | **论文流程** |
-| TestCase-Eval Task 2 | 跨框架 control | **论文流程** |
+| Task | `prompt` | `testcase_eval` | `icpc_light_v33_bridge` |
+| --- | --- | --- | --- |
+| UOJ Generation | **官方 baseline** | 不支持 | one-shot pipeline |
+| UOJ Hacking，单轮 | **官方 baseline** | 技术可运行；非论文对照 | one-shot pipeline |
+| UOJ Hacking，agent | **官方 baseline** | 不支持反馈 | 不支持反馈 |
+| UOJ Repair，单轮/agent | **官方 baseline** | 不支持 | 不支持 |
+| TestCase-Eval Task 1 | 不支持 | **论文流程** | 不支持 |
+| TestCase-Eval Task 2 | 跨框架 control | **论文流程** | 不支持 |
 
 `solution/llm/` 是共享的 TATU/OpenRouter/OpenAI-compatible transport，不是一个
 solver，也不应作为 competitor 计数。模型名、reasoning effort、token limit、

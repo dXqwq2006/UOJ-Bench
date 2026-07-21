@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cpideas.example/schemas/uoj-bench-skill-job-response-v1.json",
+  "title": "ICPC Light to UOJ-Bench bridge response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["completed", "retryable_error"]},
+    "candidate": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "content"],
+          "properties": {
+            "kind": {"const": "solution"},
+            "content": {"type": "string", "minLength": 1}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "format", "content"],
+          "properties": {
+            "kind": {"const": "hack"},
+            "format": {"enum": ["python_generator", "raw_input"]},
+            "content": {"type": "string", "minLength": 1}
+          }
+        }
+      ]
+    },
+    "raw_text": {"type": "string"},
+    "message": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Durable UOJ runner message. pipeline_identity must equal the top-level object.",
+      "required": ["role", "content", "pipeline_identity", "receipt_sha256"],
+      "properties": {
+        "role": {"const": "assistant"},
+        "content": {"type": "string"},
+        "pipeline_identity": {"type": "object"},
+        "receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "transcript": {"type": "array"},
+    "usage": {"type": "object"},
+    "error": {"type": ["string", "object", "null"]},
+    "pipeline_identity": {
+      "type": "object",
+      "description": "Hash-bound request, skill bundle, config, agent command and candidate identity. Container/image/relay identity belongs to the production scheduler receipt.",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "profile",
+        "model",
+        "reasoning_effort",
+        "request_sha256",
+        "surface_sha256",
+        "skill_bundle_sha256",
+        "expected_skill_bundle_sha256",
+        "copied_skills_sha256",
+        "skill_files",
+        "skill_bytes",
+        "bridge_config_sha256",
+        "agent_command",
+        "candidate_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "profile": {"type": "string", "minLength": 1},
+        "model": {"const": "gpt-5.6-sol"},
+        "reasoning_effort": {"const": "ultra"},
+        "request_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "surface_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "skill_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expected_skill_bundle_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "copied_skills_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "skill_files": {"type": "integer", "minimum": 1},
+        "skill_bytes": {"type": "integer", "minimum": 1},
+        "bridge_config_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "agent_command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["index", "value"],
+            "properties": {
+              "index": {"type": "integer", "minimum": 0},
+              "value": {"type": "string", "minLength": 1},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "completed"}}},
+      "then": {
+        "required": [
+          "candidate",
+          "raw_text",
+          "message",
+          "transcript",
+          "usage",
+          "pipeline_identity"
+        ],
+        "properties": {"candidate": {"not": {"type": "null"}}}
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "retryable_error"}}},
+      "then": {
+        "required": ["candidate", "error", "transcript", "usage"],
+        "properties": {"candidate": {"type": "null"}}
+      }
+    }
+  ]
+}

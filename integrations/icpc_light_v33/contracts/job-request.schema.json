@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cpideas.example/schemas/uoj-bench-skill-job-request-v1.json",
+  "title": "UOJ-Bench to ICPC Light bridge request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task",
+    "model",
+    "reasoning_effort",
+    "input"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "task": {"enum": ["generation", "hacking"]},
+    "model": {"const": "gpt-5.6-sol"},
+    "reasoning_effort": {"const": "ultra"},
+    "input": {
+      "type": "object",
+      "required": ["problem_id", "problem_statement", "metadata"],
+      "properties": {
+        "problem_id": {"type": ["integer", "string"]},
+        "problem_statement": {"type": "string", "minLength": 1},
+        "language": {"type": "string", "minLength": 1},
+        "submission_code": {"type": "string", "minLength": 1},
+        "submission_language": {"type": "string", "minLength": 1},
+        "chinese": {"type": "boolean"},
+        "metadata": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "difficulty": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "difficulty-source": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "hack_id": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "hackable": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "language": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "problem_id": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "submission_id": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "title_en": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "title_zh": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "wrong_id": {"type": ["string", "number", "integer", "boolean", "null"]}
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"task": {"const": "generation"}}},
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "problem_id",
+              "problem_statement",
+              "language",
+              "chinese",
+              "metadata"
+            ],
+            "not": {
+              "anyOf": [
+                {"required": ["submission_code"]},
+                {"required": ["submission_language"]}
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"task": {"const": "hacking"}}},
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "problem_id",
+              "problem_statement",
+              "submission_code",
+              "submission_language",
+              "chinese",
+              "metadata"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

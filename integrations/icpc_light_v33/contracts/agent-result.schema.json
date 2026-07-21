@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cpideas.example/schemas/uoj-bench-skill-agent-result-v1.json",
+  "title": "ICPC Light UOJ task-agent result",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "status", "task", "transcript", "usage"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "status": {"enum": ["completed", "retryable_error"]},
+    "task": {"enum": ["generation", "hacking"]},
+    "raw_text": {"type": "string"},
+    "final_message": {"type": "string"},
+    "transcript": {"type": "array"},
+    "usage": {"type": "object"},
+    "error": {}
+  }
+}

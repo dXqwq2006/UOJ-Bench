@@ -57,6 +57,32 @@ python -m scripts.test_hack_agent \
 All five task CLIs accept `--solver` and default to `prompt`. A custom pipeline
 can use any model stack without adding model code to `utils/` or the runners.
 
+## ICPC Light v3.3 bridge
+
+`solution/icpc_light_v33_bridge/` connects the frozen ICPC Light v3.3 skills
+pipeline through a separate JSON process boundary. It supports one-shot UOJ
+Generation and Hacking, requires the exact model contract `gpt-5.6-sol` with
+reasoning effort `ultra`, and fails closed for Repair, feedback rounds, and the
+Fault tasks. The bridge config pins the complete skill tree hash and records a
+hash-bound pipeline identity with every candidate.
+
+Run the credential-free integration smoke from the repository root:
+
+```bash
+env -u UOJ_API_KEY -u TATU_API_KEY -u OPENAI_API_KEY \
+  PYTHONDONTWRITEBYTECODE=1 \
+  python -m scripts.smoke_icpc_light_v33_bridge \
+  --uoj-root "$PWD" \
+  --output-root /absolute/system-filesystem/root/icpc-light-v33-smoke
+```
+
+This deterministic test executes the real v3.3 sweep/review scripts and the
+native UOJ Hacking rollout runner with injected workers. It makes no model or
+UOJ request and is not a benchmark score. See
+[the integration guide](docs/ICPC_LIGHT_V33_BRIDGE.zh-CN.md) and
+[zero-mount server handoff](docs/ICPC_LIGHT_V33_ZERO_MOUNT_HANDOFF.zh-CN.md)
+before configuring a production agent command.
+
 Direct tasks request one turn. The hacking and repair agent scripts keep their
 UOJ-owned trial loops and pass parser, local validation, and judge rejection
 feedback back to the session. Correct reference code and hidden error labels are

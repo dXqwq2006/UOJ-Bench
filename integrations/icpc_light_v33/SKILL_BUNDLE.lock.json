@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "bundle": "icpc-light-distilled-ver3.3.0",
+  "version": "3.3.0",
+  "source_head": "46949b222849e3094851d6fd0f1320e7129318ea",
+  "source_manifest_sha256": "f79d9655e7adeae65598c81075eb1ef90c416df8cb5b5e6a96ffb7a6f6ebd94d",
+  "source_release_sha256": "4bd3b6ff8cd89eff49fb7f7417c207b43d2a966a7edd4613dfc40a3aa37683ca",
+  "vendored_manifest_sha256": "b261735a062e4335c7790a99e85e79d493b286e292f838b212f011afbc746d67",
+  "tree_sha256": "d6eef3006a438086adfc6c4695d2cd52d9262e929ab497ac4a8576671f283234",
+  "regular_file_count": 107,
+  "regular_file_bytes": 1637992,
+  "publication_redactions": [
+    {
+      "path": "RELEASE.json",
+      "json_pointer": "/validation/live_docker_gojudge_e2e_reason",
+      "reason": "removed a host-specific absolute Docker socket path"
+    }
+  ],
+  "excluded": [
+    ".git",
+    ".DS_Store",
+    "__pycache__",
+    "*.pyc"
+  ]
+}

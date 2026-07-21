@@ -1,0 +1,4 @@
+interface:
+  display_name: "ICPC Light Preclassifier"
+  short_description: "Assign the formal three-level test-data profile"
+  default_prompt: "Using gpt-5.6-sol with ultra reasoning, use $grade-test-data-buildability only after its prerequisite evidence is complete; produce the schema-v2 preclassification or explicitly stop/escalate without forwarding unfinished work."
