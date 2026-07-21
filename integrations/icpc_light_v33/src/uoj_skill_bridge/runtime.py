@@ -39,13 +39,16 @@ PUBLIC_METADATA_FIELDS = frozenset(
     {
         "difficulty",
         "difficulty-source",
+        "display_problem_id",
         "hack_id",
         "hackable",
         "language",
+        "memory_limit_mb",
         "problem_id",
         "submission_id",
         "title_en",
         "title_zh",
+        "time_limit_ms",
         "wrong_id",
     }
 )
@@ -256,7 +259,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
     if value.get("schema_version") != 1:
         raise BridgeContractError("request schema_version must be 1")
     task = value.get("task")
-    if task not in {"generation", "hacking", "fault_exposure"}:
+    if task not in {"generation", "hacking", "fault_coverage", "fault_exposure"}:
         raise BridgeContractError("request task is unsupported")
     if value.get("model") != MODEL or value.get("reasoning_effort") != REASONING_EFFORT:
         raise BridgeContractError("request changed the frozen model or reasoning effort")
@@ -330,7 +333,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
             raise BridgeContractError(
                 "fault exposure input contains a UOJ-only field"
             )
-    else:
+    elif task == "generation":
         for name in ("language", "chinese"):
             if name not in task_input:
                 raise BridgeContractError(f"generation input requires {name}")
@@ -339,6 +342,20 @@ def _validate_request(value: Any) -> dict[str, Any]:
             for name in ("submission_id", "submission_code", "submission_language")
         ):
             raise BridgeContractError("generation input contains a target-submission field")
+    else:
+        if any(
+            name in task_input
+            for name in (
+                "language",
+                "chinese",
+                "submission_id",
+                "submission_code",
+                "submission_language",
+            )
+        ):
+            raise BridgeContractError(
+                "fault coverage input contains a solver or target-submission field"
+            )
     return json.loads(_canonical_bytes(dict(value)).decode("utf-8"))
 
 

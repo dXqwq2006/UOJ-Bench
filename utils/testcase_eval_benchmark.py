@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, as_completed, wait
-from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation, localcontext
 from itertools import groupby
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+import hashlib
 import json
 import os
 import sqlite3
@@ -22,6 +22,7 @@ from solution.api import (
     TestCaseFormat,
     solver_capabilities,
 )
+from utils.fault_coverage_benchmark import GenerationJob
 
 
 UPSTREAM_COMMIT = "45275c6f838566e6e148a9eca18edc00be08a305"
@@ -42,10 +43,22 @@ DATASETS = {
         "Raywithyou/TestCase-Eval-Task1",
         "bd8b0e2e26e1e52225ca41537eaff592142cbc85",
     ),
+    "task1_direct_prompt": (
+        "Raywithyou/TestCase-Eval-Task1-DO",
+        "294e91a4b1cbc3a93428e663afc112a017e1d5c2",
+    ),
     "task2_prompt": (
         "Raywithyou/TestCase-Eval-Task2",
         "ad6c3af216b088652b6f05d7df331b3858bf916d",
     ),
+}
+DATASET_ARTIFACT_SHA256 = {
+    "problem": "afe300bafe3212b5c7006e5a847b332e85d4031d1124a0871dbe3b1072c40b7e",
+    "submission_all": "0d0fb980fc5b5fec29f922e0ddacbc86ea5672acfcf05aaaed723bf38d669cae",
+    "submission_lite": "44388e5845c8c15cb6fdcc33be35605f7bc718b6910be235676ebdff6647dcd7",
+    "task1_prompt": "732bfac9a27c8db98155d7ab6131b75638fb9b3a41c1c6baa6f2c6f9b2e6e2fc",
+    "task1_direct_prompt": "3365348ea447594511230fb4de945b087542b40ba8edffc448e1c612e238f468",
+    "task2_prompt": "e6f9cdb5e62c4f83f4e24994f5abcd2ea31248d430523e29dcb5212009e9894c",
 }
 PAPER_GENERATIONS = {1: 20, 2: 1}
 PAPER_TEMPERATURE = 1.0
@@ -78,19 +91,6 @@ def decode_execution_output(value: Any) -> str:
             return zlib.decompress(raw[len(_EXECUTION_OUTPUT_MAGIC) :]).decode("utf-8")
         return raw.decode("utf-8")
     raise TypeError(f"unsupported execution output type: {type(value).__name__}")
-
-
-@dataclass(frozen=True)
-class GenerationJob:
-    policy: str
-    task: int
-    problem_id: str
-    problem_statement: str
-    submission_id: str
-    submission_code: str
-    submission_language: str
-    generation_id: int
-    metadata: Mapping[str, Any]
 
 
 class RunStore:
@@ -259,10 +259,34 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
-def _load_dataset(key: str, cache_dir: str | None) -> Any:
+def _load_dataset(
+    key: str,
+    cache_dir: str | None,
+    snapshot_root: str | Path | None = None,
+) -> Any:
+    name, revision = DATASETS[key]
+    if snapshot_root is not None:
+        snapshot = (
+            Path(snapshot_root).resolve()
+            / f"datasets--{name.replace('/', '--')}"
+            / "snapshots"
+            / revision
+        )
+        parquet_files = sorted((snapshot / "data").glob("*.parquet"))
+        if len(parquet_files) != 1:
+            raise ValueError(f"TestCase-Eval {key} snapshot must contain one parquet")
+        with parquet_files[0].open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        expected = DATASET_ARTIFACT_SHA256[key]
+        if digest != expected:
+            raise ValueError(
+                f"TestCase-Eval {key} parquet SHA-256 differs: {digest} != {expected}"
+            )
+        from datasets import load_dataset
+
+        return load_dataset(str(snapshot), split="train", cache_dir=cache_dir)
     from datasets import load_dataset
 
-    name, revision = DATASETS[key]
     return load_dataset(
         name,
         split="train",
@@ -402,12 +426,13 @@ def prepare_dataset(
     store: RunStore,
     *,
     cache_dir: str | None = None,
+    dataset_snapshot_root: str | Path | None = None,
     smoke_problems: int | None = None,
     problem_ids: Sequence[str] = (),
     verify_prompts: bool = True,
 ) -> dict[str, Any]:
     """Load pinned snapshots, validate policy prompts, and stage selected rows."""
-    problem_data = _load_dataset("problem", cache_dir)
+    problem_data = _load_dataset("problem", cache_dir, dataset_snapshot_root)
     problems = {_problem_id(row): dict(row) for row in problem_data}
     if problem_ids:
         selected = sorted({str(value) for value in problem_ids})
@@ -424,12 +449,12 @@ def prepare_dataset(
 
     all_rows = [
         dict(row)
-        for row in _load_dataset("submission_all", cache_dir)
+        for row in _load_dataset("submission_all", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected_set
     ]
     lite_rows = [
         dict(row)
-        for row in _load_dataset("submission_lite", cache_dir)
+        for row in _load_dataset("submission_lite", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected_set
     ]
 
@@ -437,7 +462,11 @@ def prepare_dataset(
         {
             "testcase_eval_upstream_commit": UPSTREAM_COMMIT,
             "dataset_revisions": {
-                key: {"name": value[0], "revision": value[1]}
+                key: {
+                    "name": value[0],
+                    "revision": value[1],
+                    "parquet_sha256": DATASET_ARTIFACT_SHA256[key],
+                }
                 for key, value in DATASETS.items()
             },
             "selected_problem_ids": selected,
@@ -485,10 +514,14 @@ def prepare_dataset(
         )
     store.connection.commit()
 
-    prompt_checks = {1: 0, 2: 0}
+    prompt_checks: dict[int | str, int] = {1: 0, 2: 0, "direct": 0}
     if verify_prompts:
         prompt_checks = _verify_official_prompts(
-            problems, lite_rows, selected_set, cache_dir
+            problems,
+            lite_rows,
+            selected_set,
+            cache_dir,
+            dataset_snapshot_root,
         )
 
     summary = {
@@ -500,6 +533,7 @@ def prepare_dataset(
         "right_all": sum(row.get("type") == "right_submission" for row in all_rows),
         "right_lite": sum(row.get("type") == "right_submission" for row in lite_rows),
         "verified_task1_prompts": prompt_checks[1],
+        "verified_task1_direct_prompts": prompt_checks["direct"],
         "verified_task2_prompts": prompt_checks[2],
         "problem_ids": selected,
     }
@@ -512,18 +546,25 @@ def _verify_official_prompts(
     lite_rows: Sequence[Mapping[str, Any]],
     selected: set[str],
     cache_dir: str | None,
-) -> dict[int, int]:
+    dataset_snapshot_root: str | Path | None,
+) -> dict[int | str, int]:
     from solution.testcase_eval import prompts
+    from solution.testcase_eval_task1_direct import prompts as direct_prompts
 
     expected_task1 = {
         _problem_id(row): _prompt_text(row["prompt"])
-        for row in _load_dataset("task1_prompt", cache_dir)
+        for row in _load_dataset("task1_prompt", cache_dir, dataset_snapshot_root)
+        if _problem_id(row) in selected
+    }
+    expected_task1_direct = {
+        _problem_id(row): _prompt_text(row["prompt"])
+        for row in _load_dataset("task1_direct_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
     lite_by_id = {_submission_id(row): row for row in lite_rows}
     expected_task2 = {
         (_problem_id(row), _submission_id(row)): _prompt_text(row["prompt"])
-        for row in _load_dataset("task2_prompt", cache_dir)
+        for row in _load_dataset("task2_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
 
@@ -537,6 +578,16 @@ def _verify_official_prompts(
         )
         if expected_task1.get(problem_id) != actual:
             raise ValueError(f"Task 1 prompt differs from pinned dataset for {problem_id}")
+        direct = direct_prompts.fault_coverage(
+            FaultCoverageInput(
+                problem_id,
+                _problem_statement(problems[problem_id]),
+            )
+        )
+        if expected_task1_direct.get(problem_id) != direct:
+            raise ValueError(
+                f"Task 1 direct prompt differs from pinned dataset for {problem_id}"
+            )
         checked1 += 1
 
     checked2 = 0
@@ -560,7 +611,7 @@ def _verify_official_prompts(
                 f"{problem_id}/{submission_id}"
             )
         checked2 += 1
-    return {1: checked1, 2: checked2}
+    return {1: checked1, 2: checked2, "direct": checked1}
 
 
 def _existing_generation(
@@ -844,7 +895,6 @@ def _generate_replicated(
                         flush=True,
                     )
 
-
 def generate(
     store: RunStore,
     *,
@@ -937,13 +987,13 @@ def require_paper_generation_settings(model: str) -> None:
         raise ValueError("paper mode requires TATU_TEMPERATURE=1.0") from exc
     if temperature != PAPER_TEMPERATURE:
         raise ValueError("paper mode requires TATU_TEMPERATURE=1.0")
+    if os.environ.get("TATU_MAX_OUTPUT_TOKENS") != str(
+        PAPER_REASONING_MAX_OUTPUT_TOKENS
+    ):
+        raise ValueError("paper mode requires 18000 output tokens")
     if model == "gpt-5.6-sol":
         if os.environ.get("TATU_REASONING_EFFORT") not in {"xhigh", "max"}:
             raise ValueError("gpt-5.6-sol paper run requires reasoning effort xhigh")
-        if os.environ.get("TATU_MAX_OUTPUT_TOKENS") != str(
-            PAPER_REASONING_MAX_OUTPUT_TOKENS
-        ):
-            raise ValueError("gpt-5.6-sol paper run requires 18000 output tokens")
         if os.environ.get("TATU_OPENAI_TRANSPORT") != "responses":
             raise ValueError("gpt-5.6-sol paper run requires the Responses transport")
 
@@ -1194,6 +1244,11 @@ def _expected_counts(store: RunStore) -> dict[str, int]:
     task1_generations = int(
         manifest.get("task1_generations", PAPER_GENERATIONS[1])
     )
+    model = str(manifest.get("model", ""))
+    capabilities = {
+        policy: solver_capabilities(load_solver(policy, model))
+        for policy in policies
+    }
     problem_count = store.connection.execute(
         "SELECT COUNT(*) FROM problems"
     ).fetchone()[0]
@@ -1234,11 +1289,15 @@ def _expected_counts(store: RunStore) -> dict[str, int]:
 
     generations = 0
     executions = 0
-    if 1 in tasks and "testcase_eval" in policies:
-        generations += problem_count * task1_generations
-        executions += all_count * task1_generations
+    if 1 in tasks:
+        for policy in policies:
+            if capabilities[policy].fault_coverage:
+                generations += problem_count * task1_generations
+                executions += all_count * task1_generations
     if 2 in tasks:
-        for _policy in policies:
+        for policy in policies:
+            if not capabilities[policy].fault_exposure:
+                continue
             generations += wrong_lite
             executions += sum(
                 wrong_count * (1 + rights_lite_by_problem.get(problem_id, 0))

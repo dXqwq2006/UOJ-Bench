@@ -21,6 +21,7 @@ import solution
 
 from solution import load_solver
 from solution.api import (
+    FaultCoverageInput,
     FaultExposureInput,
     GenerationInput,
     HackingInput,
@@ -357,6 +358,65 @@ class SolverAdapterTests(unittest.TestCase):
         self.assertEqual(turn.candidate.content, raw_input)
         self.assertEqual(turn.candidate.format, TestCaseFormat.RAW_INPUT)
 
+    def test_fault_coverage_exposes_only_public_problem_data(self) -> None:
+        raw_input = "2 3\n"
+        response = {
+            "schema_version": 1,
+            "status": "completed",
+            "candidate": {
+                "kind": "test_case",
+                "format": "raw_input",
+                "content": raw_input,
+            },
+            "transcript": [],
+            "usage": {},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, config_sha256 = fake_adapter_config(root)
+            expected_request = {
+                "schema_version": 1,
+                "task": "fault_coverage",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "ultra",
+                "input": {
+                    "problem_id": "ccp:codeforces:1",
+                    "problem_statement": "statement",
+                    "metadata": {
+                        "display_problem_id": "codeforces:1",
+                        "memory_limit_mb": 256,
+                        "time_limit_ms": 2000,
+                    },
+                },
+            }
+            bridge = fake_bridge(
+                root, bind_fake_response(response, config_sha256, expected_request)
+            )
+            with patch.dict(
+                os.environ,
+                {BRIDGE_ENV: str(bridge), BRIDGE_CONFIG_ENV: str(config)},
+            ):
+                solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
+                require_solver_support(solver, "fault_coverage")
+                session = solver.start_fault_coverage(
+                    FaultCoverageInput(
+                        "ccp:codeforces:1",
+                        "statement",
+                        {
+                            "display_problem_id": "codeforces:1",
+                            "memory_limit_mb": 256,
+                            "time_limit_ms": 2000,
+                            "row_index": 7,
+                            "published_true_positive_rate": 0.99,
+                        },
+                    )
+                )
+                self.assertNotIn("submission_code", session.initial_request["input"])
+                turn = session.next()
+
+        self.assertEqual(turn.candidate.content, raw_input)
+        self.assertEqual(turn.candidate.format, TestCaseFormat.RAW_INPUT)
+
     def test_wrong_model_and_bridge_failures_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires model"):
             load_solver("icpc_light_v33_bridge", "gpt-oss-120b")
@@ -471,7 +531,7 @@ class BridgeRuntimeTests(unittest.TestCase):
         config_path.chmod(0o600)
         return config_path, bundle_sha
 
-    def test_generation_hacking_and_fault_exposure_runtime_contracts(self) -> None:
+    def test_all_supported_runtime_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config, bundle_sha = self._fixture(root)
@@ -516,16 +576,34 @@ class BridgeRuntimeTests(unittest.TestCase):
                     "metadata": {},
                 },
             }
+            fault_coverage = {
+                "schema_version": 1,
+                "task": "fault_coverage",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "ultra",
+                "input": {
+                    "problem_id": "ccp:codeforces:1",
+                    "problem_statement": "statement",
+                    "metadata": {"time_limit_ms": 2000},
+                },
+            }
             with patch.dict(os.environ, {CONFIG_ENV: str(config)}):
                 generation_response = execute_request(generation)
                 hacking_response = execute_request(hacking)
+                coverage_response = execute_request(fault_coverage)
                 fault_response = execute_request(fault_exposure)
 
             self.assertEqual(generation_response["candidate"]["kind"], "solution")
             self.assertEqual(hacking_response["candidate"]["format"], "raw_input")
+            self.assertEqual(coverage_response["candidate"]["kind"], "test_case")
             self.assertEqual(fault_response["candidate"]["kind"], "test_case")
             self.assertEqual(fault_response["candidate"]["format"], "raw_input")
-            for response in (generation_response, hacking_response, fault_response):
+            for response in (
+                generation_response,
+                hacking_response,
+                coverage_response,
+                fault_response,
+            ):
                 identity = response["pipeline_identity"]
                 self.assertEqual(identity["skill_bundle_sha256"], bundle_sha)
                 self.assertEqual(identity["expected_skill_bundle_sha256"], bundle_sha)

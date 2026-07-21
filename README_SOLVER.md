@@ -61,12 +61,14 @@ can use any model stack without adding model code to `utils/` or the runners.
 
 `solution/icpc_light_v33_bridge/` connects the frozen ICPC Light v3.3 skills
 pipeline through a separate JSON process boundary. It supports one-shot UOJ
-Generation and Hacking plus TestCase-Eval Task 2 Fault Exposure. It requires
+Generation and Hacking, TestCase-Eval Task 2 Fault Exposure, and public-only
+Fault Coverage for TestCase-Eval Task 1 and CodeContests+ Verified. It requires
 the exact model contract `gpt-5.6-sol` with reasoning effort `ultra`, and fails
-closed for Repair, feedback rounds, and Fault Coverage. The bridge config pins
+closed for Repair and feedback rounds. The bridge config pins
 the complete skill tree hash and records a hash-bound pipeline identity with
 every candidate; TestCase-Eval result databases also bind its stable pipeline
-signature before persisting a completed generation.
+signature before persisting a completed generation. The shared offline
+fault-coverage loop applies the same binding to CodeContests+ results.
 
 Run the credential-free integration smoke from the repository root:
 
@@ -160,14 +162,18 @@ server instead of OpenRouter. `GPT_OSS_API_KEY` is optional and defaults to
 
 ## TestCase-Eval
 
-The `testcase_eval` policy implements both paper tasks: problem-level Fault
-Coverage (20 independent generations) and submission-targeted Fault Exposure
-(one generation). The prompt snapshots, data revisions, extraction regex,
-fixed `gpt-4.1-mini` fallback, oracle consensus, output comparator, and scoring
-are pinned to TestCase-Eval commit `45275c6`. The existing `prompt` policy is
-available as an additional Task 2 control; its output remains a Python generator.
+Task 1 has two independent solver directories. `testcase_eval_task1_cot` is the
+paper baseline; `testcase_eval_task1_direct` is the direct-output prompt from
+the separately published Task1-DO snapshot. Both use their published strict
+regex extractor and never fall back to another model. The older
+`testcase_eval` policy remains available for Task 2 Fault Exposure, including
+its fixed `gpt-4.1-mini` extraction fallback. Data revisions, prompt snapshots,
+oracle consensus, comparator, and scoring are pinned to TestCase-Eval commit
+`45275c6`.
 
-The reproduction is offline after dataset download. It runs generated inputs
+The reproduction is offline after dataset download. `--dataset-snapshot-root`
+accepts an HF Hub cache root and verifies the six parquet SHA-256 values before
+loading them. It runs generated inputs
 against the Codeforces submissions in a network-disabled, non-root Docker
 container and never calls UOJ. SQLite stores every prompt, raw response,
 candidate, usage record, materialized input, and execution result with stable
@@ -190,7 +196,7 @@ Do not pass `--paper` to that competitor run: the solver intentionally uses the
 ICPC Light prompt/pipeline, while Task 2's dataset, candidate materialization,
 local evaluator, and score remain unchanged.
 
-For a three-problem GPT-5.6 smoke using both Task 2 policies:
+For a two-problem GPT-5.6 Task 1 smoke using both published prompts:
 
 ```bash
 export TATU_API_KEY=...
@@ -204,17 +210,17 @@ export TATU_TIMEOUT_SECONDS=1200
 export TESTCASE_EVAL_EXTRACTOR_API_KEY=...
 export TESTCASE_EVAL_EXTRACTOR_BASE_URL=https://api.openai.com/v1
 
-RESULT=results/testcase-eval/gpt-5.6-sol-smoke
-python -m scripts.run_testcase_eval_batch --phase prepare \
-  --result-dir "$RESULT" --smoke-problems 3
-python -m scripts.run_testcase_eval_batch --phase preflight \
+RESULT=results/testcase-eval-task1/gpt-5.6-sol-smoke
+python -m scripts.test_testcase_eval_task1 --phase prepare \
+  --result-dir "$RESULT" --problem-id 2000D --problem-id 2005E1 \
+  --dataset-snapshot-root "$HF_HOME/hub"
+python -m scripts.test_testcase_eval_task1 --phase preflight \
   --result-dir "$RESULT" --model gpt-5.6-sol --paper
-python -m scripts.run_testcase_eval_batch --phase generate \
-  --result-dir "$RESULT" --model gpt-5.6-sol --paper --workers 16 \
-  --policy testcase_eval --policy prompt
-python -m scripts.run_testcase_eval_batch --phase judge \
-  --result-dir "$RESULT" --workers 64
-python -m scripts.run_testcase_eval_batch --phase stats \
+python -m scripts.test_testcase_eval_task1 --phase generate \
+  --result-dir "$RESULT" --model gpt-5.6-sol --paper --workers 16
+python -m scripts.test_testcase_eval_task1 --phase judge \
+  --result-dir "$RESULT" --workers 64 --judge-backend lightcp
+python -m scripts.test_testcase_eval_task1 --phase stats \
   --result-dir "$RESULT"
 ```
 
@@ -239,12 +245,72 @@ The extractor endpoint must support `POST /responses`, structured JSON output,
 and the exact `gpt-4.1-mini` model. Preflight fails closed when that model is
 unavailable; do not substitute another extractor in a paper-labeled run.
 
-The smoke makes 180 main-model calls: 60 Task 1, 60 official Task 2, and 60
-UOJ-prompt Task 2 calls, plus fallback calls only for malformed responses. A
-full official run uses 20,000 main calls and 2,493,220 submission executions.
-Adding the UOJ Task 2 control raises this to 30,000 calls and 2,558,720
-executions, plus 10,000 generator materializations. Remove `--smoke-problems`
-and use a fresh result directory for that run.
+This smoke makes 80 main-model calls and 21,520 submission executions per
+model. Full Task 1 is 10,000 calls and 2,427,720 executions for one policy, or
+20,000 calls and 4,855,440 executions for CoT plus Direct. Use a fresh result
+directory for each model and evaluator fingerprint.
+
+## CodeContests+ Verified
+
+`scripts.run_codecontests_plus` adapts the pinned public CodeContests+ `1x`
+split to the same fault-coverage interface as TestCase-Eval task 1. It selects
+rows whose published true-positive and true-negative rates are both at least
+`0.9`, then gives each problem 20 independent generations. The dataset's
+validator decides whether a generated input is legal. A published correct
+submission produces the answer, and the dataset's checker judges every
+sampled correct and incorrect submission. Following the paper's 100-per-class
+cap, the adapter uses a reproducible SHA-256 ordering and samples at most 100
+of each role. The resulting metrics are valid-input rate, true-positive rate,
+and true-negative rate.
+
+`icpc_light_v33_bridge` can run as a non-paper competitor without changing the
+CodeContests+ dataset or evaluator. Its Fault Coverage request contains only
+the public statement and allowlisted public metadata; no correct/incorrect
+program, validator, checker, or oracle crosses the solver boundary. Each bridge
+job returns one `TestCaseCandidate`, while this runner still controls the 20
+independent generations and all downstream scoring.
+
+```bash
+RESULT=results/codecontests-plus/gpt-5.6-sol-smoke
+python -m scripts.run_codecontests_plus --phase prepare --result-dir "$RESULT" \
+  --smoke-problems 1
+python -m scripts.run_codecontests_plus --phase audit --result-dir "$RESULT" --workers 32
+python -m scripts.run_codecontests_plus --phase preflight --result-dir "$RESULT" \
+  --model gpt-5.6-sol
+python -m scripts.run_codecontests_plus --phase generate --result-dir "$RESULT" \
+  --model gpt-5.6-sol --policy icpc_light_v33_bridge \
+  --workers 16 --max-generations-per-problem 1
+python -m scripts.run_codecontests_plus --phase judge --result-dir "$RESULT" --workers 64
+python -m scripts.run_codecontests_plus --phase stats --result-dir "$RESULT"
+python -m scripts.run_codecontests_plus --phase export --result-dir "$RESULT"
+```
+
+Do not label this competitor run `--paper`: the benchmark harness is unchanged,
+but the ICPC Light pipeline is not the published TestCase-Eval Task 1 prompt.
+
+The evaluator requires the `codecontests-plus` LightCP profile advertised by
+`/health`. The adapter audits the sampled C++17, Python 2/3, and Java 21
+programs before generation and excludes compilation failures from scoring.
+The public `UNKNOWN` label mixes several languages and is excluded rather than
+guessed. For an official run, omit `--smoke-problems` and
+`--max-generations-per-problem`; the manifest records the dataset revision,
+Verified thresholds, sample rule, selected row indices, compiler audit,
+evaluator fingerprint, and generation budget. Repeated `--dataset-parquet`
+arguments can pin downloaded `1x` shards by SHA-256.
+
+For a deterministic uniform subset, use `--sample-problems 500`. Selection is
+performed after the Verified filter by SHA-256 min-hash over each stable problem
+key with the fixed `codecontests-plus-verified-v1` seed. The method, seed,
+Verified population, sample size, and selected keys are stored in the manifest.
+Use `--sample-seed` only when intentionally defining a different benchmark
+subset.
+
+On H100, unprivileged namespaces are disabled. The deployed fallback uses
+`chroot`, UID/GID isolation, `no-new-privs`, `prlimit`, output caps, and wall
+timeouts, and its identity is included in the evaluator fingerprint. It is
+weaker than go-judge namespace isolation and must run only the public benchmark
+sources. Use the Docker/go-judge evaluator on a host that permits namespaces
+for an isolation-equivalent final run.
 
 ## Hacking batches
 

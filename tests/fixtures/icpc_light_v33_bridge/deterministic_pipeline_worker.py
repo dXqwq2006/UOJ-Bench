@@ -86,9 +86,25 @@ def _hack() -> None:
     (output / "candidate.in").write_text("2 3\n", encoding="utf-8")
 
 
+def _coverage() -> None:
+    public = Path("public")
+    for name in ("task.json", "statement.md"):
+        if not (public / name).is_file():
+            raise RuntimeError(f"Fault Coverage task slice is missing {name}")
+    if (public / "wrong-source.txt").exists():
+        raise RuntimeError("Fault Coverage task slice received a target source")
+    output = Path("output")
+    output.mkdir()
+    (output / "candidate.in").write_text("2 3\n", encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("blind-lane", "review", "hack"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("blind-lane", "review", "hack", "coverage"),
+        required=True,
+    )
     parser.add_argument("--kind", choices=("neutral", "deceptive"))
     parser.add_argument("--lane-id")
     parser.add_argument("--review-id")
@@ -107,8 +123,10 @@ def main() -> int:
         ):
             parser.error("review requires all review identity arguments")
         _review(args)
-    else:
+    elif args.mode == "hack":
         _hack()
+    else:
+        _coverage()
     return 0
 
 

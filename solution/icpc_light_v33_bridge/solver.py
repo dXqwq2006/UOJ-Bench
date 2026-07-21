@@ -20,6 +20,7 @@ import time
 from typing import Any, Mapping, Optional
 
 from solution.api import (
+    FaultCoverageInput,
     FaultExposureInput,
     GenerationInput,
     HackCandidate,
@@ -46,13 +47,16 @@ PUBLIC_METADATA_FIELDS = frozenset(
     {
         "difficulty",
         "difficulty-source",
+        "display_problem_id",
         "hack_id",
         "hackable",
         "language",
+        "memory_limit_mb",
         "problem_id",
         "submission_id",
         "title_en",
         "title_zh",
+        "time_limit_ms",
         "wrong_id",
     }
 )
@@ -566,19 +570,20 @@ class _BridgeSession:
             elif candidate_format != "python_generator":
                 raise BridgeProtocolError("hack candidate format is unsupported")
             candidate = HackCandidate(content)
-        elif self.task == "fault_exposure":
+        elif self.task in {"fault_coverage", "fault_exposure"}:
+            label = self.task.replace("_", " ")
             if set(candidate_raw) != {"kind", "format", "content"}:
-                raise BridgeProtocolError("fault exposure candidate fields are invalid")
+                raise BridgeProtocolError(f"{label} candidate fields are invalid")
             if candidate_raw.get("kind") != "test_case":
                 raise BridgeProtocolError(
-                    "fault exposure bridge returned the wrong candidate kind"
+                    f"{label} bridge returned the wrong candidate kind"
                 )
             content = _candidate_text(candidate_raw.get("content"), "test case")
             try:
                 candidate_format = TestCaseFormat(candidate_raw.get("format"))
             except (TypeError, ValueError) as exc:
                 raise BridgeProtocolError(
-                    "fault exposure candidate format is unsupported"
+                    f"{label} candidate format is unsupported"
                 ) from exc
             candidate = TestCaseCandidate(content, candidate_format)
         else:
@@ -599,7 +604,7 @@ class _BridgeSession:
 
 
 class ICLightBridgeSolver:
-    """One-shot public-only Generation/Hacking/Fault Exposure adapter."""
+    """One-shot public-only generation and adversarial-test adapter."""
 
     capabilities = SolverCapabilities(
         generation=True,
@@ -608,7 +613,7 @@ class ICLightBridgeSolver:
         generation_feedback=False,
         hacking_feedback=False,
         repair_feedback=False,
-        fault_coverage=False,
+        fault_coverage=True,
         fault_exposure=True,
     )
 
@@ -660,8 +665,22 @@ class ICLightBridgeSolver:
     def start_repair(self, task: Any) -> Any:
         raise NotImplementedError("ICPC Light v3.3 does not emit UOJ search/replace patches")
 
-    def start_fault_coverage(self, task: Any) -> Any:
-        raise NotImplementedError("use a dedicated variable-suite benchmark runner")
+    def start_fault_coverage(self, task: FaultCoverageInput) -> _BridgeSession:
+        return _BridgeSession(
+            "fault_coverage",
+            {
+                "schema_version": 1,
+                "task": "fault_coverage",
+                "model": self.model,
+                "reasoning_effort": ICPC_LIGHT_REASONING_EFFORT,
+                "input": {
+                    "problem_id": task.problem_id,
+                    "problem_statement": task.problem_statement,
+                    "metadata": _public_metadata(task.metadata),
+                },
+            },
+            expected_config_binding=self._expected_config_binding,
+        )
 
     def start_fault_exposure(self, task: FaultExposureInput) -> _BridgeSession:
         return _BridgeSession(

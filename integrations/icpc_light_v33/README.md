@@ -6,8 +6,8 @@ or UOJ evaluator.
 
 - Solver name: `icpc_light_v33_bridge`
 - Model contract: exact `gpt-5.6-sol`, reasoning effort `ultra`
-- Supported tasks: one-shot Generation, Hacking, and Fault Exposure
-- Unsupported: Repair, feedback rounds, Fault Coverage
+- Supported tasks: one-shot Generation, Hacking, Fault Coverage, and Fault Exposure
+- Unsupported: Repair and feedback rounds
 
 The benchmark runner launches the configured bridge executable over one JSON object
 on stdin/stdout. The bridge creates one private workspace, copies the frozen
@@ -31,6 +31,6 @@ Documentation:
 - [Zero-mount server handoff](../../docs/ICPC_LIGHT_V33_ZERO_MOUNT_HANDOFF.zh-CN.md)
 
 The deterministic smoke uses injected test workers. It calls the real v3.3
-sweep/review scripts, UOJ's native Hacking rollout runner, and a TestCase-Eval
-Task 2 Fault Exposure job, but it calls neither a model nor UOJ and is not a
-benchmark score.
+sweep/review scripts, UOJ's native Hacking rollout runner, a public-only Fault
+Coverage job, and a TestCase-Eval Task 2 Fault Exposure job, but it calls
+neither a model nor UOJ and is not a benchmark score.

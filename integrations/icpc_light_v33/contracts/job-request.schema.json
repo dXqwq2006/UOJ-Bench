@@ -13,7 +13,7 @@
   ],
   "properties": {
     "schema_version": {"const": 1},
-    "task": {"enum": ["generation", "hacking", "fault_exposure"]},
+    "task": {"enum": ["generation", "hacking", "fault_coverage", "fault_exposure"]},
     "model": {"const": "gpt-5.6-sol"},
     "reasoning_effort": {"const": "ultra"},
     "input": {
@@ -33,13 +33,16 @@
           "properties": {
             "difficulty": {"type": ["string", "number", "integer", "boolean", "null"]},
             "difficulty-source": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "display_problem_id": {"type": ["string", "number", "integer", "boolean", "null"]},
             "hack_id": {"type": ["string", "number", "integer", "boolean", "null"]},
             "hackable": {"type": ["string", "number", "integer", "boolean", "null"]},
             "language": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "memory_limit_mb": {"type": ["string", "number", "integer", "boolean", "null"]},
             "problem_id": {"type": ["string", "number", "integer", "boolean", "null"]},
             "submission_id": {"type": ["string", "number", "integer", "boolean", "null"]},
             "title_en": {"type": ["string", "number", "integer", "boolean", "null"]},
             "title_zh": {"type": ["string", "number", "integer", "boolean", "null"]},
+            "time_limit_ms": {"type": ["string", "number", "integer", "boolean", "null"]},
             "wrong_id": {"type": ["string", "number", "integer", "boolean", "null"]}
           }
         }
@@ -62,6 +65,25 @@
             ],
             "not": {
               "anyOf": [
+                {"required": ["submission_id"]},
+                {"required": ["submission_code"]},
+                {"required": ["submission_language"]}
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"task": {"const": "fault_coverage"}}},
+      "then": {
+        "properties": {
+          "input": {
+            "required": ["problem_id", "problem_statement", "metadata"],
+            "not": {
+              "anyOf": [
+                {"required": ["language"]},
+                {"required": ["chinese"]},
                 {"required": ["submission_id"]},
                 {"required": ["submission_code"]},
                 {"required": ["submission_language"]}

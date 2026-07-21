@@ -504,7 +504,11 @@ def _call_gemini(history, model, key, base, max_tokens, temperature):
     deployer = os.environ.get("TATU_DEPLOYER", "").strip()
     request_model = model if not deployer or "@" in model else f"{model}@{deployer}"
     messages, system = _gemini_messages(history)
-    generation_config = {"maxOutputTokens": max_tokens}
+    thinking_config = {"thinkingLevel": "high", "includeThoughts": True}
+    generation_config = {
+        "maxOutputTokens": max_tokens,
+        "thinkingConfig": thinking_config,
+    }
     if temperature is not None:
         generation_config["temperature"] = temperature
     payload = {"contents": messages, "generationConfig": generation_config}
@@ -552,6 +556,7 @@ def _call_gemini(history, model, key, base, max_tokens, temperature):
             "deployer": deployer or None,
             "max_output_tokens": max_tokens,
             "temperature": temperature,
+            "thinking_config": thinking_config,
         },
     )
 

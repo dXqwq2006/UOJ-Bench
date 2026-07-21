@@ -8,8 +8,10 @@ from unittest.mock import patch
 from scripts import run_testcase_eval_batch
 
 from utils.testcase_eval_benchmark import (
+    DATASET_ARTIFACT_SHA256,
     GenerationJob,
     RunStore,
+    _load_dataset,
     decode_execution_output,
     encode_execution_output,
     generate,
@@ -86,6 +88,24 @@ def execution_record(task, submission_id, generation_id, checked_id, checked_typ
 
 
 class ComparatorTests(unittest.TestCase):
+    def test_offline_snapshot_must_match_pinned_artifact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parquet = (
+                Path(directory)
+                / "datasets--TestCase-Eval--problem"
+                / "snapshots"
+                / "b5cc0cc4589f5e38c1b010c24a4c5f513009278e"
+                / "data"
+                / "train.parquet"
+            )
+            parquet.parent.mkdir(parents=True)
+            parquet.write_bytes(b"not the pinned dataset")
+            with self.assertRaisesRegex(
+                ValueError,
+                DATASET_ARTIFACT_SHA256["problem"],
+            ):
+                _load_dataset("problem", None, directory)
+
     def test_official_line_token_numeric_and_boolean_rules(self):
         self.assertTrue(validate_outputs("1  2\nYES", "1 2\nyes"))
         self.assertTrue(validate_outputs("1.0000000000005", "1"))
@@ -359,6 +379,49 @@ class PreflightTests(unittest.TestCase):
                 RuntimeError, "strict benchmark is blocked"
             ):
                 run_testcase_eval_batch._preflight("model", paper=False)
+
+    def test_gemini_paper_preflight_requires_high_thinking(self):
+        with patch(
+            "scripts.run_testcase_eval_batch.require_paper_generation_settings"
+        ), patch(
+            "solution.llm.call_llm.call_llm_details",
+            return_value=(
+                "```plaintext\n1\n```",
+                {
+                    "request_config": {
+                        "max_output_tokens": 18_000,
+                        "temperature": 1.0,
+                    }
+                },
+                {},
+            ),
+        ), patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            return_value=("1", {"model": "gpt-4.1-mini"}, {}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "thinking_config"):
+                run_testcase_eval_batch._preflight(
+                    "gemini-3.1-pro-preview", paper=True
+                )
+
+    def test_strict_task1_policies_skip_extractor_preflight(self):
+        with patch(
+            "solution.llm.call_llm.call_llm_details",
+            return_value=("```plaintext\n1\n```", {"request_config": {}}, {}),
+        ), patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            side_effect=AssertionError("extractor must not run"),
+        ):
+            result = run_testcase_eval_batch._preflight(
+                "model",
+                paper=False,
+                policies=(
+                    "testcase_eval_task1_cot",
+                    "testcase_eval_task1_direct",
+                ),
+            )
+
+        self.assertNotIn("extractor", result)
 
 
 class ExecutorTests(unittest.TestCase):

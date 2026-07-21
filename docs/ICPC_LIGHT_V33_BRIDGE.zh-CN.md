@@ -3,8 +3,8 @@
 ## 接入结论
 
 `solution/icpc_light_v33_bridge` 是 UOJ-Bench 原生 typed solver。它不修改
-dataset、官方 prompt、UOJ client 或评分逻辑，而是把 Generation、Hacking 与
-TestCase-Eval Task 2 Fault Exposure 输入转换成一个独立 JSON bridge job：
+dataset、官方 prompt、UOJ client 或评分逻辑，而是把 Generation、Hacking、
+Fault Coverage 与 Fault Exposure 输入转换成一个独立 JSON bridge job：
 
 ```text
 UOJ / TestCase-Eval runner
@@ -22,8 +22,9 @@ UOJ / TestCase-Eval runner
 | --- | --- | --- |
 | Generation | one-shot | `output/main.cpp` |
 | Hacking | one-shot | `output/candidate.in` 或 `output/generator.py` |
+| Fault Coverage / TCE Task 1 / CC+V | one-shot；次数由原生 runner 控制 | `output/candidate.in` 或 `output/generator.py` |
 | Fault Exposure / TCE Task 2 | one-shot | `output/candidate.in` 或 `output/generator.py` |
-| Repair / feedback / Fault Coverage | 不支持 | fail closed |
+| Repair / feedback | 不支持 | fail closed |
 
 模型合同是精确 `gpt-5.6-sol`、`reasoning_effort=ultra`。改变模型、effort、bundle、
 config 或 agent command 都属于不同 pipeline identity。
@@ -80,8 +81,9 @@ release 字节。
 `expected_skill_bundle_sha256` 在启动 agent 前校验；receipt 同时记录实际 bundle SHA、复制后
 skills tree SHA、config SHA、agent command 文件 SHA、request/surface/candidate SHA 和日志 SHA。
 同一 benchmark 进程还会冻结第一份 config 与 pipeline signature，拒绝中途漂移。
-TestCase-Eval 的 SQLite manifest 会按 policy 绑定相同的稳定 signature，跨进程恢复时
-也拒绝把另一套 bridge config、bundle 或 agent command 的完成结果混入同一数据库。
+TestCase-Eval 与 CC+V 的 SQLite manifest 会按 policy 绑定相同的稳定 signature，
+跨进程恢复时也拒绝把另一套 bridge config、bundle 或 agent command 的完成结果混入
+同一数据库。
 
 环境变量：
 
@@ -113,9 +115,15 @@ env -u UOJ_API_KEY -u TATU_API_KEY -u OPENAI_API_KEY \
   `run_blind_review.py`，随后编译导出源码并跑 3 个语义用例；
 - Hacking：public-only task slice，经原生 `run_hack_rollout_batch` 跑 Easy C++ 与
   Hard Python3 各一条，并用独立参考程序确认两条输入都能暴露错解；
+- Fault Coverage：按 CC+V / TestCase-Eval Task 1 typed contract，仅暴露题面与公开
+  metadata，确认工作区没有目标提交，并用隐藏在 evaluator 侧的错解/参考解做语义检查；
 - Fault Exposure：按 TestCase-Eval Task 2 typed contract 产出原始输入，并用本地错误解和
   独立参考程序确认能够暴露目标错误提交；
-- 4 个隔离 workspace、receipt、bundle/surface 不变性、非 C++ wrong source、无正确解泄漏。
+- 5 个隔离 workspace、receipt、bundle/surface 不变性、非 C++ wrong source、无正确解泄漏。
+
+CC+V 的完整运行仍由 `scripts.run_codecontests_plus` 完成：每题 20 个独立 bridge
+job，随后使用数据集原生 validator、正确提交 oracle、checker 和 LightCP 执行层。
+这些程序和评测资产不会进入 solver workspace。
 
 fixture 是 test override，报告固定写
 `deterministic-pipeline-smoke-test-override-no-model-no-uoj`。它证明 adapter、pipeline

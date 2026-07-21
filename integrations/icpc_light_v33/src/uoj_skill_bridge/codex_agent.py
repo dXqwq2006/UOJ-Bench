@@ -56,6 +56,19 @@ in output/candidate.in; use output/generator.py only if a static input is
 genuinely unsuitable. Do not write or seek an accepted source, an answer file,
 or another file under output/.
 """
+    if task == "fault_coverage":
+        return common + """
+This is a CodeContests+ Verified or TestCase-Eval Task 1 Fault Coverage slice.
+Read surface/statement.md and the public metadata in surface/task.json. Build
+one small, complete, valid stdin that is likely to expose common incorrect
+solutions; no target program is supplied. Write exactly one artifact: prefer
+raw bytes in output/candidate.in; use output/generator.py only if a static input
+is genuinely unsuitable. Do not write or seek an accepted or wrong source, an
+answer file, or another file under output/. The benchmark will run its own
+validator, oracle, checker, and local evaluator; do not call UOJ or any external
+judge. Each invocation produces one candidate; the native benchmark runner
+controls the independent-generation budget.
+"""
     return common + """
 This is a TestCase-Eval Task 2 Fault Exposure slice. Read
 surface/statement.md, surface/task.json for `submission_id` and
@@ -107,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--task",
-        choices=("generation", "hacking", "fault_exposure"),
+        choices=("generation", "hacking", "fault_coverage", "fault_exposure"),
         required=True,
     )
     parser.add_argument("--workspace", type=Path, required=True)

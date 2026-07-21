@@ -24,7 +24,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_IMAGE = "uoj-bench-testcase-eval:45275c6"
 
 
-def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
+def _arguments(
+    default_tasks: Sequence[int] | None,
+    default_policies: Sequence[str] | None,
+) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--phase",
@@ -54,6 +57,7 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
         help="race this many API requests per logical generation",
     )
     parser.add_argument("--dataset-cache")
+    parser.add_argument("--dataset-snapshot-root", type=Path)
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--paper", action="store_true")
     parser.add_argument("--no-verify-prompts", action="store_true")
@@ -74,7 +78,9 @@ def _arguments(default_tasks: Sequence[int] | None) -> argparse.Namespace:
     parser.add_argument("--judge-identity", help=argparse.SUPPRESS)
     args = parser.parse_args()
     args.tasks = sorted(set(args.task or default_tasks or (1, 2)))
-    args.policies = sorted(set(args.policies or ("testcase_eval",)))
+    args.policies = sorted(
+        set(args.policies or default_policies or ("testcase_eval",))
+    )
     return args
 
 
@@ -82,7 +88,11 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
 
 
-def _preflight(model: str, paper: bool) -> dict[str, object]:
+def _preflight(
+    model: str,
+    paper: bool,
+    policies: Sequence[str] = ("testcase_eval",),
+) -> dict[str, object]:
     if paper:
         require_paper_generation_settings(model)
     from solution.llm.call_llm import call_llm_details
@@ -110,34 +120,54 @@ def _preflight(model: str, paper: bool) -> dict[str, object]:
         }
         if mismatches:
             raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
-    try:
-        extracted, extractor_message, extractor_usage = extract_test_input_llm(
-            "Test Input:\n1"
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            "fixed gpt-4.1-mini extractor preflight failed; "
-            "the strict benchmark is blocked"
-        ) from exc
-    if extracted.strip() != "1":
-        raise RuntimeError(f"extractor preflight returned {extracted!r}")
-    return {
+    if paper and model == "gemini-3.1-pro-preview":
+        expected = {
+            "max_output_tokens": 18_000,
+            "temperature": 1.0,
+            "thinking_config": {
+                "thinkingLevel": "high",
+                "includeThoughts": True,
+            },
+        }
+        mismatches = {
+            key: (request_config.get(key), value)
+            for key, value in expected.items()
+            if request_config.get(key) != value
+        }
+        if mismatches:
+            raise RuntimeError(f"main-model preflight settings differ: {mismatches}")
+    result = {
         "main": {
             "model": message.get("model"),
             "request_config": request_config,
             "usage": usage,
             "returned_text": bool(raw_text),
         },
-        "extractor": {
+    }
+    if "testcase_eval" in policies:
+        try:
+            extracted, extractor_message, extractor_usage = extract_test_input_llm(
+                "Test Input:\n1"
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "fixed gpt-4.1-mini extractor preflight failed; "
+                "the strict benchmark is blocked"
+            ) from exc
+        if extracted.strip() != "1":
+            raise RuntimeError(f"extractor preflight returned {extracted!r}")
+        result["extractor"] = {
             "model": extractor_message.get("model"),
             "request_config": extractor_message.get("request_config"),
             "usage": extractor_usage,
             "extracted": extracted,
-        },
-    }
+        }
+    return result
 
 
 def _run_docker(args: argparse.Namespace) -> None:
+    from utils.testcase_eval_executor import evaluation_owner
+
     dockerfile = ROOT / "docker" / "testcase_eval.Dockerfile"
     subprocess.run(
         [
@@ -184,6 +214,8 @@ def _run_docker(args: argparse.Namespace) -> None:
         "/workspace",
         "--env",
         "PYTHONDONTWRITEBYTECODE=1",
+        "--env",
+        f"UOJ_BENCH_EVALUATION_OWNER={evaluation_owner()}",
         args.image,
         "python3",
         "-m",
@@ -203,14 +235,17 @@ def _run_docker(args: argparse.Namespace) -> None:
     subprocess.run(command, check=True)
 
 
-def main(default_tasks: Sequence[int] | None = None) -> None:
-    args = _arguments(default_tasks)
+def main(
+    default_tasks: Sequence[int] | None = None,
+    default_policies: Sequence[str] | None = None,
+) -> None:
+    args = _arguments(default_tasks, default_policies)
     args.result_dir = args.result_dir.resolve()
     args.result_dir.mkdir(parents=True, exist_ok=True)
     database = args.result_dir / "results.sqlite3"
 
     if args.phase == "preflight":
-        _print(_preflight(args.model, args.paper))
+        _print(_preflight(args.model, args.paper, args.policies))
         return
     if args.phase == "judge":
         if args.judge_backend == "lightcp":
@@ -247,6 +282,7 @@ def main(default_tasks: Sequence[int] | None = None) -> None:
                 prepare_dataset(
                     store,
                     cache_dir=args.dataset_cache,
+                    dataset_snapshot_root=args.dataset_snapshot_root,
                     smoke_problems=args.smoke_problems,
                     problem_ids=args.problem_id,
                     verify_prompts=not args.no_verify_prompts,

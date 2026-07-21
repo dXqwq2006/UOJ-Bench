@@ -484,6 +484,10 @@ class CallLlmTests(unittest.TestCase):
         )
         payload = session.post.call_args.kwargs["json"]
         self.assertEqual(payload["systemInstruction"], {"parts": [{"text": "system"}]})
+        self.assertEqual(
+            payload["generationConfig"]["thinkingConfig"],
+            {"thinkingLevel": "high", "includeThoughts": True},
+        )
         self.assertEqual(payload["contents"][1]["role"], "model")
         self.assertEqual(payload["contents"][1]["parts"], old_parts)
         message = result["choices"][0]["message"]
@@ -497,6 +501,10 @@ class CallLlmTests(unittest.TestCase):
                 "deployer": "GOOGLE",
                 "max_output_tokens": 65536,
                 "temperature": None,
+                "thinking_config": {
+                    "thinkingLevel": "high",
+                    "includeThoughts": True,
+                },
             },
         )
         self.assertEqual(

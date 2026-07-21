@@ -210,7 +210,12 @@ def _adversarial(workspace: Path, worker: Path, task: str) -> dict[str, Any]:
     public.mkdir(parents=True)
     surface = workspace / "surface"
     before: dict[str, str] = {}
-    for name in ("task.json", "statement.md", "wrong-source.txt"):
+    public_files = (
+        ("task.json", "statement.md")
+        if task == "fault_coverage"
+        else ("task.json", "statement.md", "wrong-source.txt")
+    )
+    for name in public_files:
         source = surface / name
         before[name] = _sha256_file(source)
         shutil.copy2(source, public / name, follow_symlinks=False)
@@ -218,7 +223,12 @@ def _adversarial(workspace: Path, worker: Path, task: str) -> dict[str, Any]:
             raise RuntimeError(f"{task} public copy changed {name}")
     python = str(Path(sys.executable).resolve(strict=True))
     _run(
-        [python, str(worker), "--mode", "hack"],
+        [
+            python,
+            str(worker),
+            "--mode",
+            "coverage" if task == "fault_coverage" else "hack",
+        ],
         cwd=stage,
         label=f"public-only {task} task slice",
     )
@@ -245,7 +255,7 @@ def main() -> int:
     parser.add_argument("--worker", type=Path, required=True)
     parser.add_argument(
         "--task",
-        choices=("generation", "hacking", "fault_exposure"),
+        choices=("generation", "hacking", "fault_coverage", "fault_exposure"),
         required=True,
     )
     parser.add_argument("--workspace", type=Path, required=True)

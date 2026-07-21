@@ -180,7 +180,12 @@ def _load_uoj(
     import solution
 
     from solution import load_solver
-    from solution.api import FaultExposureInput, GenerationInput, require_solver_support
+    from solution.api import (
+        FaultCoverageInput,
+        FaultExposureInput,
+        GenerationInput,
+        require_solver_support,
+    )
     from solution.icpc_light_v33_bridge.solver import (
         BRIDGE_CONFIG_ENV,
         BRIDGE_ENV,
@@ -206,6 +211,7 @@ def _load_uoj(
     return (
         load_solver,
         GenerationInput,
+        FaultCoverageInput,
         FaultExposureInput,
         require_solver_support,
         (BRIDGE_ENV, BRIDGE_CONFIG_ENV),
@@ -422,6 +428,7 @@ def run_smoke(
     (
         load_solver,
         GenerationInput,
+        FaultCoverageInput,
         FaultExposureInput,
         require_solver_support,
         env_names,
@@ -437,6 +444,7 @@ def run_smoke(
         solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
         require_solver_support(solver, "generation")
         require_solver_support(solver, "hacking")
+        require_solver_support(solver, "fault_coverage")
         require_solver_support(solver, "fault_exposure")
         generation_turn = solver.start_generation(
             GenerationInput(
@@ -447,6 +455,27 @@ def run_smoke(
         ).next()
         if generation_turn.candidate is None:
             raise RuntimeError(f"generation returned no candidate: {generation_turn.error}")
+
+        fault_coverage_turn = solver.start_fault_coverage(
+            FaultCoverageInput(
+                "ccp:codeforces:900001",
+                STATEMENT,
+                {
+                    "display_problem_id": "codeforces:900001",
+                    "source": "codeforces",
+                    "source_problem_id": "900001",
+                    "time_limit_ms": 2000,
+                    "memory_limit_mb": 256,
+                    "row_index": 17,
+                    "published_true_positive_rate": 0.99,
+                },
+            )
+        ).next()
+        if fault_coverage_turn.candidate is None:
+            raise RuntimeError(
+                "fault coverage returned no candidate: "
+                f"{fault_coverage_turn.error}"
+            )
 
         build = output_root / "local-evaluator"
         build.mkdir()
@@ -499,6 +528,17 @@ def run_smoke(
 
     wrong_binary = _compile(WRONG_SOURCE, build / "wrong")
     reference_binary = _compile(REFERENCE_SOURCE, build / "reference")
+    coverage_candidate = fault_coverage_turn.candidate
+    if coverage_candidate.format.value == "raw_input":
+        coverage_input = coverage_candidate.content
+    elif coverage_candidate.format.value == "python_generator":
+        coverage_input = _generator_output(coverage_candidate.content)
+    else:
+        raise RuntimeError("fault coverage returned an unsupported candidate format")
+    coverage_wrong_output = _run(wrong_binary, coverage_input)
+    coverage_expected_output = _run(reference_binary, coverage_input)
+    if coverage_wrong_output == coverage_expected_output:
+        raise RuntimeError("fault coverage did not expose the smoke wrong solution")
     fault_candidate = fault_exposure_turn.candidate
     if fault_candidate.format.value == "raw_input":
         fault_input = fault_candidate.content
@@ -546,11 +586,12 @@ def run_smoke(
         )
 
     job_dirs = sorted(path for path in workspaces.iterdir() if path.is_dir())
-    if len(job_dirs) != 4:
-        raise RuntimeError(f"expected four isolated jobs, found {len(job_dirs)}")
+    if len(job_dirs) != 5:
+        raise RuntimeError(f"expected five isolated jobs, found {len(job_dirs)}")
     saw_python_hack = False
     generation_pipeline_detail: dict[str, Any] | None = None
     hacking_pipeline_details: list[dict[str, Any]] = []
+    fault_coverage_pipeline_detail: dict[str, Any] | None = None
     fault_exposure_pipeline_detail: dict[str, Any] | None = None
     for job in job_dirs:
         names = {path.name for path in (job / "surface").iterdir()}
@@ -577,7 +618,18 @@ def run_smoke(
             if detail.get("execution_mode") != "test-override-public-only-hacking-slice":
                 raise RuntimeError("Hacking did not complete its public-only task slice")
             hacking_pipeline_details.append(detail)
-        else:
+        elif request["task"] == "fault_coverage":
+            if (
+                detail.get("execution_mode")
+                != "test-override-public-only-fault_coverage-slice"
+            ):
+                raise RuntimeError(
+                    "Fault Coverage did not complete its public-only task slice"
+                )
+            if "wrong-source.txt" in names:
+                raise RuntimeError("Fault Coverage surface received a target source")
+            fault_coverage_pipeline_detail = detail
+        elif request["task"] == "fault_exposure":
             if (
                 detail.get("execution_mode")
                 != "test-override-public-only-fault_exposure-slice"
@@ -586,6 +638,8 @@ def run_smoke(
                     "Fault Exposure did not complete its public-only task slice"
                 )
             fault_exposure_pipeline_detail = detail
+        else:
+            raise RuntimeError(f"unexpected smoke task: {request['task']}")
         if request["task"] == "hacking" and request["input"]["submission_language"] == "Python3":
             saw_python_hack = True
             materialized = (job / "surface" / "wrong-source.txt").read_text(encoding="utf-8")
@@ -599,9 +653,10 @@ def run_smoke(
     if (
         generation_pipeline_detail is None
         or len(hacking_pipeline_details) != 2
+        or fault_coverage_pipeline_detail is None
         or fault_exposure_pipeline_detail is None
     ):
-        raise RuntimeError("pipeline detail count does not match the four smoke jobs")
+        raise RuntimeError("pipeline detail count does not match the five smoke jobs")
 
     report = {
         "schema_version": 1,
@@ -633,6 +688,19 @@ def run_smoke(
             "pipeline_receipts": [
                 item["receipt_sha256"] for item in hacking_pipeline_details
             ],
+        },
+        "fault_coverage": {
+            "passed": True,
+            "candidate_format": coverage_candidate.format.value,
+            "candidate_sha256": _sha256(coverage_candidate.content),
+            "input_sha256": _sha256(coverage_input),
+            "wrong_output": coverage_wrong_output,
+            "expected_output": coverage_expected_output,
+            "receipt_sha256": fault_coverage_turn.message["receipt_sha256"],
+            "pipeline_identity_sha256": _canonical_sha256(
+                fault_coverage_turn.message["pipeline_identity"]
+            ),
+            "pipeline": fault_coverage_pipeline_detail,
         },
         "fault_exposure": {
             "passed": True,

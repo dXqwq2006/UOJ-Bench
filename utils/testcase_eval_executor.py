@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import tempfile
@@ -24,6 +25,10 @@ TIME_LIMIT_SECONDS = 3.0
 MEMORY_LIMIT_MB = 512
 OUTPUT_LIMIT_BYTES = 16 * 1024 * 1024
 GENERATOR_TIMEOUT_SECONDS = 6.0
+
+
+def evaluation_owner() -> str:
+    return os.environ.get("UOJ_BENCH_EVALUATION_OWNER") or socket.gethostname()
 
 
 @dataclass(frozen=True)
@@ -75,6 +80,7 @@ def bind_judge_backend(
 ) -> None:
     connection = _connect(database)
     encoded = json.dumps(backend)
+    owner = json.dumps(evaluation_owner())
     row = connection.execute(
         "SELECT value_json FROM manifest WHERE key = 'judge_backend'"
     ).fetchone()
@@ -85,21 +91,35 @@ def bind_judge_backend(
                 "result database is already bound to judge backend "
                 f"{row['value_json']}, not {encoded}"
             )
-    else:
-        execution_count = connection.execute(
-            "SELECT COUNT(*) AS count FROM executions"
-        ).fetchone()["count"]
-        if execution_count:
-            connection.close()
-            raise RuntimeError(
-                "result database already has unbound execution rows; "
-                "use a fresh result directory for a fingerprinted judge backend"
-            )
+    owner_row = connection.execute(
+        "SELECT value_json FROM manifest WHERE key = 'evaluation_owner'"
+    ).fetchone()
+    if owner_row is not None and owner_row["value_json"] != owner:
+        connection.close()
+        raise RuntimeError(
+            "result database is already bound to evaluation owner "
+            f"{owner_row['value_json']}, not {owner}"
+        )
+    execution_count = connection.execute(
+        "SELECT COUNT(*) AS count FROM executions"
+    ).fetchone()["count"]
+    if execution_count and (row is None or owner_row is None):
+        connection.close()
+        raise RuntimeError(
+            "result database already has unbound execution rows; "
+            "set its judge backend and evaluation owner before resuming"
+        )
+    if row is None:
         connection.execute(
             "INSERT INTO manifest(key, value_json) VALUES ('judge_backend', ?)",
             (encoded,),
         )
-        connection.commit()
+    if owner_row is None:
+        connection.execute(
+            "INSERT INTO manifest(key, value_json) VALUES ('evaluation_owner', ?)",
+            (owner,),
+        )
+    connection.commit()
     connection.close()
 
 
