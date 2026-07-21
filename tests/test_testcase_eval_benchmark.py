@@ -272,6 +272,7 @@ class PreflightTests(unittest.TestCase):
                 policies=(
                     "testcase_eval_task1_cot",
                     "testcase_eval_task1_direct",
+                    "testcase_eval_task2_direct",
                 ),
             )
 

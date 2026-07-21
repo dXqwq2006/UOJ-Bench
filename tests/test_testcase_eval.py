@@ -24,6 +24,7 @@ from solution.testcase_eval import TestCaseEvalSolver
 from solution.testcase_eval.solver import _EXTRACTOR_PROMPT, extract_test_input
 from solution.testcase_eval_task1_cot.prompts import TASK1_COT
 from solution.testcase_eval_task1_direct.prompts import TASK1_DIRECT
+from solution.testcase_eval_task2_direct.prompts import TASK2_DIRECT
 
 
 class FakeCaller:
@@ -237,6 +238,48 @@ class TestCaseEvalTask1PolicyTests(unittest.TestCase):
         ):
             turn = solver.start_fault_coverage(
                 FaultCoverageInput("2000A", "Problem")
+            ).next()
+
+        self.assertIsNone(turn.candidate)
+        self.assertEqual(turn.error, "no test input found")
+
+
+class TestCaseEvalTask2DirectPolicyTests(unittest.TestCase):
+    def test_pinned_prompt_template(self):
+        self.assertEqual(
+            hashlib.sha256(TASK2_DIRECT.encode()).hexdigest(),
+            "ca25dcf9fa267a6b10a1a43bfaee882a352f6eaaf7e9bed34fb7aad572b3dadc",
+        )
+
+    def test_direct_is_strict_fault_exposure_solver(self):
+        solver = load_solver("testcase_eval_task2_direct", "model")
+        caller = FakeCaller("```plaintext\n1\n7\n```")
+        solver.call_details = caller
+        task = FaultExposureInput(
+            "2000A",
+            "Problem statement",
+            42,
+            "int main() {}",
+            "C++20 (GCC 13-64)",
+        )
+
+        turn = solver.start_fault_exposure(task).next()
+
+        self.assertEqual(turn.candidate, TestCaseCandidate("1\n7"))
+        self.assertTrue(solver.capabilities.fault_exposure)
+        self.assertFalse(solver.capabilities.fault_coverage)
+        self.assertFalse(solver.capabilities.hacking)
+        self.assertEqual(len(caller.calls), 1)
+
+    def test_malformed_response_never_uses_fallback_extractor(self):
+        solver = load_solver("testcase_eval_task2_direct", "model")
+        solver.call_details = FakeCaller("Test Input:\n1")
+        with patch(
+            "solution.testcase_eval.solver.extract_test_input_llm",
+            side_effect=AssertionError("fallback must not run"),
+        ):
+            turn = solver.start_fault_exposure(
+                FaultExposureInput("2000A", "Problem", 42, "wrong", "C++")
             ).next()
 
         self.assertIsNone(turn.candidate)

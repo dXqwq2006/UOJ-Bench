@@ -45,6 +45,8 @@ ADDED = {
     "solution/testcase_eval_task1_cot/prompts.py",
     "solution/testcase_eval_task1_direct/__init__.py",
     "solution/testcase_eval_task1_direct/prompts.py",
+    "solution/testcase_eval_task2_direct/__init__.py",
+    "solution/testcase_eval_task2_direct/prompts.py",
     "tests/test_call_llm.py",
     "tests/test_hack_batch.py",
     "tests/test_solver.py",

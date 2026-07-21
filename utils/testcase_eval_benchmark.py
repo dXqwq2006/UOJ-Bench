@@ -48,6 +48,10 @@ DATASETS = {
         "Raywithyou/TestCase-Eval-Task2",
         "ad6c3af216b088652b6f05d7df331b3858bf916d",
     ),
+    "task2_direct_prompt": (
+        "Raywithyou/TestCase-Eval-Task2-DO",
+        "32433626e9704fa70fafc70f0234afb1c9cb73b7",
+    ),
 }
 DATASET_ARTIFACT_SHA256 = {
     "problem": "afe300bafe3212b5c7006e5a847b332e85d4031d1124a0871dbe3b1072c40b7e",
@@ -56,6 +60,7 @@ DATASET_ARTIFACT_SHA256 = {
     "task1_prompt": "732bfac9a27c8db98155d7ab6131b75638fb9b3a41c1c6baa6f2c6f9b2e6e2fc",
     "task1_direct_prompt": "3365348ea447594511230fb4de945b087542b40ba8edffc448e1c612e238f468",
     "task2_prompt": "e6f9cdb5e62c4f83f4e24994f5abcd2ea31248d430523e29dcb5212009e9894c",
+    "task2_direct_prompt": "d0fcbe31c17db227fa38e580235142163712c99b3b531377b65695c55f3298b8",
 }
 PAPER_GENERATIONS = {1: 20, 2: 1}
 PAPER_TEMPERATURE = 1.0
@@ -412,7 +417,12 @@ def prepare_dataset(
         )
     store.connection.commit()
 
-    prompt_checks: dict[int | str, int] = {1: 0, 2: 0, "direct": 0}
+    prompt_checks: dict[int | str, int] = {
+        1: 0,
+        2: 0,
+        "task1_direct": 0,
+        "task2_direct": 0,
+    }
     if verify_prompts:
         prompt_checks = _verify_official_prompts(
             problems,
@@ -431,8 +441,9 @@ def prepare_dataset(
         "right_all": sum(row.get("type") == "right_submission" for row in all_rows),
         "right_lite": sum(row.get("type") == "right_submission" for row in lite_rows),
         "verified_task1_prompts": prompt_checks[1],
-        "verified_task1_direct_prompts": prompt_checks["direct"],
+        "verified_task1_direct_prompts": prompt_checks["task1_direct"],
         "verified_task2_prompts": prompt_checks[2],
+        "verified_task2_direct_prompts": prompt_checks["task2_direct"],
         "problem_ids": selected,
     }
     store.bind_manifest({"prepared_counts": summary})
@@ -448,6 +459,7 @@ def _verify_official_prompts(
 ) -> dict[int | str, int]:
     from solution.testcase_eval import prompts
     from solution.testcase_eval_task1_direct import prompts as direct_prompts
+    from solution.testcase_eval_task2_direct import prompts as task2_direct_prompts
 
     expected_task1 = {
         _problem_id(row): _prompt_text(row["prompt"])
@@ -463,6 +475,11 @@ def _verify_official_prompts(
     expected_task2 = {
         (_problem_id(row), _submission_id(row)): _prompt_text(row["prompt"])
         for row in _load_dataset("task2_prompt", cache_dir, dataset_snapshot_root)
+        if _problem_id(row) in selected
+    }
+    expected_task2_direct = {
+        (_problem_id(row), _submission_id(row)): _prompt_text(row["prompt"])
+        for row in _load_dataset("task2_direct_prompt", cache_dir, dataset_snapshot_root)
         if _problem_id(row) in selected
     }
 
@@ -509,7 +526,22 @@ def _verify_official_prompts(
                 f"{problem_id}/{submission_id}"
             )
         checked2 += 1
-    return {1: checked1, 2: checked2, "direct": checked1}
+
+        direct = task2_direct_prompts.fault_exposure(
+            FaultExposureInput(
+                problem_id,
+                _problem_statement(problems[problem_id]),
+                int(submission_id) if submission_id.isdigit() else submission_id,
+                str(submission["source"]),
+                str(submission.get("language", "")),
+            )
+        )
+        if expected_task2_direct.get(key) != direct:
+            raise ValueError(
+                f"Task 2 direct prompt differs from pinned dataset for "
+                f"{problem_id}/{submission_id}"
+            )
+    return {1: checked1, 2: checked2, "task1_direct": checked1, "task2_direct": checked2}
 
 
 def _existing_generation(

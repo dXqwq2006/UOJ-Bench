@@ -323,3 +323,41 @@ class TestCaseEvalTask1Solver(TestCaseEvalSolver):
         self, task: FaultExposureInput
     ) -> SolverSession[TestCaseCandidate]:
         raise NotImplementedError("Task 1 solvers do not support fault exposure")
+
+
+class TestCaseEvalTask2Solver(TestCaseEvalSolver):
+    """Strict Task 2 policy with no model-based extraction fallback."""
+
+    capabilities = SolverCapabilities(
+        generation=False,
+        hacking=False,
+        repair=False,
+        fault_coverage=False,
+        fault_exposure=True,
+        generation_feedback=False,
+        hacking_feedback=False,
+        repair_feedback=False,
+    )
+
+    def __init__(self, model: str, prompt_builder, call_details=None):
+        super().__init__(model, call_details)
+        self.prompt_builder = prompt_builder
+
+    def start_hacking(self, task: HackingInput) -> SolverSession[HackCandidate]:
+        raise NotImplementedError("Task 2 solvers do not support UOJ hacking")
+
+    def start_fault_coverage(
+        self, task: FaultCoverageInput
+    ) -> SolverSession[TestCaseCandidate]:
+        raise NotImplementedError("Task 2 solvers do not support fault coverage")
+
+    def start_fault_exposure(
+        self, task: FaultExposureInput
+    ) -> SolverSession[TestCaseCandidate]:
+        return _OneShotSession(
+            self.model,
+            self.call_details,
+            None,
+            self.prompt_builder(task),
+            TestCaseCandidate,
+        )
