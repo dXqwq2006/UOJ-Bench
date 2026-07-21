@@ -25,7 +25,7 @@ from typing import Any, Mapping, Sequence
 
 
 MODEL = "gpt-5.6-sol"
-REASONING_EFFORT = "ultra"
+REASONING_EFFORT = "xhigh"
 CONFIG_ENV = "ICPC_LIGHT_UOJ_BRIDGE_CONFIG"
 MAX_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_CONFIG_BYTES = 1024 * 1024

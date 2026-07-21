@@ -15,7 +15,7 @@
     "schema_version": {"const": 1},
     "task": {"enum": ["generation", "hacking", "fault_coverage", "fault_exposure"]},
     "model": {"const": "gpt-5.6-sol"},
-    "reasoning_effort": {"const": "ultra"},
+    "reasoning_effort": {"const": "xhigh"},
     "input": {
       "type": "object",
       "required": ["problem_id", "problem_statement", "metadata"],

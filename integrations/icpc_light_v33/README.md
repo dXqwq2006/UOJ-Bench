@@ -5,7 +5,7 @@ UOJ-Bench's typed solver API without changing the benchmark dataset, prompts,
 or UOJ evaluator.
 
 - Solver name: `icpc_light_v33_bridge`
-- Model contract: exact `gpt-5.6-sol`, reasoning effort `ultra`
+- Model contract: exact `gpt-5.6-sol`, reasoning effort `xhigh`
 - Supported tasks: one-shot Generation, Hacking, Fault Coverage, and Fault Exposure
 - Unsupported: Repair and feedback rounds
 

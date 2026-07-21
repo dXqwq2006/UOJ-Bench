@@ -76,7 +76,7 @@ TestCase-Eval 的 accepted submissions 用于 oracle 共识，不计作要杀死
 ### `icpc_light_v33_bridge`
 
 - 出处：仓库内 manifest/lock 固定的 ICPC Light v3.3 skill bundle 与独立 JSON
-  bridge；配置固定精确 `gpt-5.6-sol`、`reasoning_effort=ultra`。
+  bridge；配置固定精确 `gpt-5.6-sol`、`reasoning_effort=xhigh`。
 - 支持 UOJ Generation/Hacking、TestCase-Eval Task 2 Fault Exposure，以及
   TestCase-Eval Task 1 / CodeContests+ Verified Fault Coverage 的 one-shot typed
   contract；不支持 Repair 或 judge feedback。

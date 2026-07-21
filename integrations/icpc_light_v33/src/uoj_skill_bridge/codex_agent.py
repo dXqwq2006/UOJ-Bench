@@ -19,7 +19,6 @@ import time
 from typing import Any
 
 from .runtime import (
-    DEFAULT_MAX_CANDIDATE_BYTES,
     MAX_AGENT_LOG_BYTES,
     _read_bounded_regular_file,
     _write_json,
@@ -27,7 +26,7 @@ from .runtime import (
 
 
 MODEL = "gpt-5.6-sol"
-REASONING_EFFORT = "ultra"
+REASONING_EFFORT = "xhigh"
 
 
 def _prompt(task: str) -> str:
@@ -104,6 +103,34 @@ def _usage(data: bytes) -> dict[str, int]:
     return maxima
 
 
+def _final_message(data: bytes) -> str:
+    """Return the last assistant message from Codex JSONL events."""
+
+    messages: list[str] = []
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        stack: list[Any] = [event]
+        while stack:
+            value = stack.pop()
+            if isinstance(value, dict):
+                item_type = value.get("type")
+                if item_type in {"agent_message", "assistant_message"}:
+                    text = value.get("text")
+                    if isinstance(text, str) and text:
+                        messages.append(text)
+                if value.get("role") == "assistant":
+                    content = value.get("content")
+                    if isinstance(content, str) and content:
+                        messages.append(content)
+                stack.extend(value.values())
+            elif isinstance(value, list):
+                stack.extend(value)
+    return messages[-1] if messages else ""
+
+
 def _tail(data: bytes, maximum: int = 2000) -> str:
     return data[-maximum * 4 :].decode("utf-8", errors="replace")[-maximum:]
 
@@ -140,23 +167,22 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
         return 2
-    final_path = workspace / "control" / "codex-final.txt"
     command = [
         codex,
         "exec",
+        "--json",
         "--ephemeral",
         "--skip-git-repo-check",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--model",
+        MODEL,
+        "-c",
+        f'model_reasoning_effort="{REASONING_EFFORT}"',
         "--sandbox",
         "workspace-write",
         "--cd",
         str(workspace),
-        "--model",
-        MODEL,
-        "--config",
-        f'model_reasoning_effort="{REASONING_EFFORT}"',
-        "--json",
-        "--output-last-message",
-        str(final_path),
         "-",
     ]
     started = time.monotonic()
@@ -177,16 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     stderr_data = _read_bounded_regular_file(
         stderr_path, label="Codex stderr log", maximum=MAX_AGENT_LOG_BYTES
     )
-    final_data = (
-        _read_bounded_regular_file(
-            final_path,
-            label="Codex final message",
-            maximum=DEFAULT_MAX_CANDIDATE_BYTES,
-        )
-        if final_path.exists() or final_path.is_symlink()
-        else b""
-    )
-    final = final_data.decode("utf-8", errors="replace")
+    final = _final_message(events_data)
     status = "completed" if completed.returncode == 0 else "retryable_error"
     result = {
         "schema_version": 1,

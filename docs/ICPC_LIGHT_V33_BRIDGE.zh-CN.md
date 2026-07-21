@@ -26,7 +26,7 @@ UOJ / TestCase-Eval runner
 | Fault Exposure / TCE Task 2 | one-shot | `output/candidate.in` 或 `output/generator.py` |
 | Repair / feedback | 不支持 | fail closed |
 
-模型合同是精确 `gpt-5.6-sol`、`reasoning_effort=ultra`。改变模型、effort、bundle、
+模型合同是精确 `gpt-5.6-sol`、`reasoning_effort=xhigh`。改变模型、effort、bundle、
 config 或 agent command 都属于不同 pipeline identity。
 
 ## 目录
@@ -71,7 +71,13 @@ release 字节。
   "skill_bundle_root": "/absolute/repo/integrations/icpc_light_v33/vendor/icpc-light-distilled-ver3.3.0",
   "skill_bundle_device": 0,
   "expected_skill_bundle_sha256": "d6eef3006a438086adfc6c4695d2cd52d9262e929ab497ac4a8576671f283234",
-  "agent_command": ["/absolute/path/to/zero-mount-scheduler"],
+  "agent_command": [
+    "/absolute/repo/integrations/icpc_light_v33/bin/icpc-light-uoj-zero-mount-scheduler",
+    "--agent-image-id", "sha256:<xhigh-agent-image-id>",
+    "--relay-container", "icpc-light-v33-relay",
+    "--relay-image-id", "sha256:<relay-image-id>",
+    "--integration-manifest-sha256", "<MANIFEST.sha256 file hash>"
+  ],
   "timeout_seconds": 21600,
   "max_candidate_bytes": 4194304,
   "retain_workspaces": true
@@ -132,6 +138,10 @@ fixture 是 test override，报告固定写
 ## Production 边界
 
 `icpc-light-uoj-codex-agent` 只是 public-only reference agent，不是安全沙箱。正式模型运行时，
-config 的 `agent_command` 必须指向经过审核的零挂载 Docker/cgroup scheduler；输入输出只经
-`docker cp`，agent 看不到完整 UOJ checkout、dataset、其他样本、UOJ key 或宿主文件系统。
+config 的 `agent_command` 指向随 integration 发布的 `icpc-light-uoj-zero-mount-scheduler`；
+输入输出只经 `docker cp`，agent 看不到完整 UOJ checkout、dataset、其他样本、UOJ key 或
+宿主文件系统。scheduler 拒绝 tag，只接受 config 中冻结的 agent/relay `sha256:` image ID，
+并要求 agent image 声明 `reasoning-effort=xhigh`。专用 relay 必须独立启动，不得复用其他实验
+的 relay 容器。scheduler 启动每个 job 前逐文件核验 integration manifest；manifest 文件本身
+的 SHA 写在 `agent_command` 中，因此也进入 benchmark 的 pipeline signature。
 完整服务器要求见 [zero-mount handoff](ICPC_LIGHT_V33_ZERO_MOUNT_HANDOFF.zh-CN.md)。

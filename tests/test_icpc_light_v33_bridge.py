@@ -40,6 +40,13 @@ from uoj_skill_bridge.runtime import (
     _tree_sha256,
     execute_request,
 )
+from uoj_skill_bridge.codex_agent import _final_message
+from uoj_skill_bridge.zero_mount_scheduler import (
+    SchedulerError,
+    _attest_integration,
+    _container_create_argv,
+    _job_subnet,
+)
 
 
 def fake_bridge(root: Path, response: dict) -> Path:
@@ -54,7 +61,7 @@ def fake_bridge(root: Path, response: dict) -> Path:
             import sys
             request = json.load(sys.stdin)
             assert request["schema_version"] == 1
-            assert request["reasoning_effort"] == "ultra"
+            assert request["reasoning_effort"] == "xhigh"
             assert "UOJ_API_KEY" not in os.environ
             assert "TATU_API_KEY" not in os.environ
             assert os.environ.get("PYTHONDONTWRITEBYTECODE") == "1"
@@ -101,7 +108,7 @@ def bind_fake_response(
         "schema_version": 1,
         "profile": "adapter-unit-test",
         "model": "gpt-5.6-sol",
-        "reasoning_effort": "ultra",
+        "reasoning_effort": "xhigh",
         "request_sha256": hashlib.sha256(request_bytes).hexdigest(),
         "surface_sha256": "2" * 64,
         "skill_bundle_sha256": "1" * 64,
@@ -212,7 +219,7 @@ class SolverAdapterTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "generation",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": 7,
                     "problem_statement": "statement",
@@ -277,7 +284,7 @@ class SolverAdapterTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "hacking",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": 1,
                     "problem_statement": "statement",
@@ -325,7 +332,7 @@ class SolverAdapterTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "fault_exposure",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": "2000A",
                     "problem_statement": "statement",
@@ -378,7 +385,7 @@ class SolverAdapterTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "fault_coverage",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": "ccp:codeforces:1",
                     "problem_statement": "statement",
@@ -454,6 +461,48 @@ class SolverAdapterTests(unittest.TestCase):
 
 
 class BridgeRuntimeTests(unittest.TestCase):
+    def test_codex_event_parser_uses_last_assistant_message(self) -> None:
+        events = b"\n".join(
+            [
+                json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "first"}}).encode(),
+                json.dumps({"role": "assistant", "content": "last"}).encode(),
+            ]
+        )
+        self.assertEqual(_final_message(events), "last")
+
+    def test_zero_mount_create_contract_is_xhigh_and_has_no_mounts(self) -> None:
+        image = "sha256:" + "1" * 64
+        argv = _container_create_argv(
+            name="icpc-light-v33-agent-test",
+            network_id="2" * 64,
+            image_id=image,
+            user="1000:1000",
+            task="hacking",
+        )
+        self.assertNotIn("--mount", argv)
+        self.assertNotIn("--volume", argv)
+        self.assertNotIn("--tmpfs", argv)
+        self.assertIn("SKILL_EVAL_REASONING_EFFORT=xhigh", argv)
+        self.assertIn("OPENAI_API_KEY=skill-eval-placeholder-token", argv)
+        self.assertEqual(argv[argv.index("--entrypoint") + 2], image)
+
+    def test_zero_mount_job_subnets_are_small_and_deterministic(self) -> None:
+        self.assertEqual(_job_subnet("0" * 20), "10.240.0.0/29")
+        self.assertEqual(_job_subnet("0" * 19 + "1"), "10.240.0.8/29")
+        with self.assertRaisesRegex(SchedulerError, "suffix"):
+            _job_subnet("not-hex")
+
+    def test_zero_mount_scheduler_binds_complete_integration_manifest(self) -> None:
+        integration = ROOT / "integrations" / "icpc_light_v33"
+        manifest_sha256 = hashlib.sha256(
+            (integration / "MANIFEST.sha256").read_bytes()
+        ).hexdigest()
+        root, actual = _attest_integration(manifest_sha256)
+        self.assertEqual(root, integration)
+        self.assertEqual(actual, manifest_sha256)
+        with self.assertRaisesRegex(SchedulerError, "identity changed"):
+            _attest_integration("0" * 64)
+
     def test_vendored_skill_bundle_matches_lock_and_manifest(self) -> None:
         integration = ROOT / "integrations" / "icpc_light_v33"
         bundle = integration / "vendor" / "icpc-light-distilled-ver3.3.0"
@@ -539,7 +588,7 @@ class BridgeRuntimeTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "generation",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": 1,
                     "problem_statement": "statement",
@@ -552,7 +601,7 @@ class BridgeRuntimeTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "hacking",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": 1,
                     "problem_statement": "statement",
@@ -566,7 +615,7 @@ class BridgeRuntimeTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "fault_exposure",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": "2000A",
                     "problem_statement": "statement",
@@ -580,7 +629,7 @@ class BridgeRuntimeTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "fault_coverage",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": "ccp:codeforces:1",
                     "problem_statement": "statement",
@@ -620,7 +669,7 @@ class BridgeRuntimeTests(unittest.TestCase):
                 "schema_version": 1,
                 "task": "generation",
                 "model": "gpt-5.6-sol",
-                "reasoning_effort": "ultra",
+                "reasoning_effort": "xhigh",
                 "input": {
                     "problem_id": 1,
                     "problem_statement": "statement",

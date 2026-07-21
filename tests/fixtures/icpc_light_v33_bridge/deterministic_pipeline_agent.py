@@ -17,6 +17,8 @@ from typing import Any
 
 
 MODEL = "gpt-5.6-sol"
+# The frozen v3.3 script fixtures validate their upstream release metadata.
+# Production model calls are independently frozen to xhigh by the bridge.
 EFFORT = "ultra"
 
 

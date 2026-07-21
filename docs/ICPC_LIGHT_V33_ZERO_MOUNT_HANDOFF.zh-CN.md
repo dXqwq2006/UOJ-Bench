@@ -60,8 +60,14 @@ route/effort，以及目标文件系统 source/fstype/device。
 - 拒绝 symlink、hardlink、special file、额外 artifact 与执行期间变化；
 - 保存 image/container/network/copy/cleanup receipts，并只回收本 profile 拥有的资源。
 
-在该 scheduler 接好之前，只允许运行 deterministic smoke；不能把 reference agent 的
-`workspace-write` 当作 production zero-mount 证明。
+integration 已提供 `bin/icpc-light-uoj-zero-mount-scheduler`。生产 config 必须把其绝对路径、
+不可变 xhigh agent image ID、专用 relay 名称和不可变 relay image ID 全部写入
+`agent_command`，并追加 `--integration-manifest-sha256`；这些值会进入 pipeline signature。
+scheduler 会逐文件核验该 manifest，不接受只绑定入口脚本的配置。
+`docker/agent-xhigh.Dockerfile` 从已审核
+v3.3 agent image 派生，只替换冻结的 Codex provider gate，并把实际 API effort 固定为
+`xhigh`。vendored v3.3 文档里的旧 `ultra` 字样属于上游发布物，不能作为实际调用参数；
+正式 receipt、bridge request、Codex argv 和派生 image label 必须全部是 `xhigh`。
 
 ## 两阶段 Hacking
 
