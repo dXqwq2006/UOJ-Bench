@@ -999,6 +999,7 @@ def _execute_program(
     records = []
     for test in tests:
         value = by_id.get(str(test["generation_id"]))
+        checker_error = ""
         if value is None:
             raise RuntimeError("LightCP batch omitted a requested test id")
         result = _normalize_result(value)
@@ -1013,6 +1014,9 @@ def _execute_program(
                 result = "accepted"
             elif exit_status in {1, 2}:
                 result = "wrong_answer"
+            elif exit_status == 3:
+                result = "oracle_conflict"
+                checker_error = str(checked.get("stderr") or checked)
             else:
                 raise RuntimeError(f"CodeContests+ checker failed: {checked}")
         elapsed = float(value.get("timeNs") or 0) / 1_000_000_000
@@ -1030,7 +1034,8 @@ def _execute_program(
                 "",
                 result,
                 str(value.get("stdout") or ""),
-                str(value.get("stderr") or value.get("signal") or ""),
+                checker_error
+                or str(value.get("stderr") or value.get("signal") or ""),
                 elapsed,
                 int(value.get("memoryBytes") or 0) // 1024,
                 time.time(),
@@ -1109,19 +1114,30 @@ def execute_pending(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     counts = {"program_batches": len(pending_by_program), "executions": 0}
+    invalid_candidates: set[tuple[str, int]] = set()
     iterator = iter(pending_by_program)
     with ThreadPoolExecutor(max_workers=workers) as pool:
         pending = set()
 
         def submit_next() -> bool:
-            try:
-                program, tests = next(iterator)
-            except StopIteration:
-                return False
-            pending.add(
-                pool.submit(_execute_program, base_url, policy, program, tests)
-            )
-            return True
+            while True:
+                try:
+                    program, tests = next(iterator)
+                except StopIteration:
+                    return False
+                active_tests = [
+                    test
+                    for test in tests
+                    if (program["problem_id"], test["generation_id"])
+                    not in invalid_candidates
+                ]
+                if active_tests:
+                    pending.add(
+                        pool.submit(
+                            _execute_program, base_url, policy, program, active_tests
+                        )
+                    )
+                    return True
 
         for _ in range(workers * 2):
             if not submit_next():
@@ -1130,24 +1146,65 @@ def execute_pending(
         batch = []
         while pending:
             completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+            completed_records = []
+            conflicts: dict[tuple[str, int], str] = {}
             for future in completed:
                 records = future.result()
                 completed_batches += 1
-                counts["executions"] += len(records)
                 for record in records:
-                    counts[record[10]] = counts.get(record[10], 0) + 1
-                batch.extend(records)
-                if len(batch) >= 1000:
-                    store.connection.executemany(statement, batch)
-                    store.connection.commit()
-                    batch.clear()
+                    key = (str(record[2]), int(record[4]))
+                    if record[10] == "oracle_conflict":
+                        conflicts[key] = (
+                            f"detected by {record[5]}: {record[12]}"
+                        )
+                completed_records.extend(records)
+
+            new_conflicts = set(conflicts) - invalid_candidates
+            if new_conflicts:
+                store.connection.executemany(
+                    """
+                    UPDATE ccplus_candidates
+                    SET valid = 0, status = 'oracle_conflict', error = ?, created_at = ?
+                    WHERE policy = ? AND problem_id = ? AND generation_id = ?
+                      AND status = 'complete'
+                    """,
+                    (
+                        (conflicts[key], time.time(), policy, key[0], key[1])
+                        for key in new_conflicts
+                    ),
+                )
+                store.connection.commit()
+                invalid_candidates.update(new_conflicts)
+                counts["oracle_conflicts"] = counts.get("oracle_conflicts", 0) + len(
+                    new_conflicts
+                )
+                batch = [
+                    record
+                    for record in batch
+                    if (str(record[2]), int(record[4])) not in invalid_candidates
+                ]
+
+            durable_records = [
+                record
+                for record in completed_records
+                if (str(record[2]), int(record[4])) not in invalid_candidates
+            ]
+            counts["executions"] += len(durable_records)
+            for record in durable_records:
+                counts[record[10]] = counts.get(record[10], 0) + 1
+            batch.extend(durable_records)
+            for _ in completed:
                 submit_next()
-                if completed_batches % 100 == 0:
-                    print(
-                        f"execute {completed_batches}/{len(pending_by_program)} "
-                        f"program batches, {counts['executions']} runs",
-                        flush=True,
-                    )
+            if len(batch) >= 1000:
+                store.connection.executemany(statement, batch)
+                store.connection.commit()
+                batch.clear()
+            if completed_batches % 100 == 0:
+                print(
+                    f"execute {completed_batches}/{len(pending_by_program)} "
+                    f"program batches, {counts['executions']} runs",
+                    flush=True,
+                )
         if batch:
             store.connection.executemany(statement, batch)
             store.connection.commit()
@@ -1337,8 +1394,24 @@ def score(store: RunStore) -> dict[str, Any]:
         """,
         (DATASET_KEY, policy),
     ).fetchone()[0]
+    oracle_conflicts = store.connection.execute(
+        """
+        SELECT COUNT(*) FROM ccplus_candidates
+        WHERE policy = ? AND status = 'oracle_conflict'
+        """,
+        (policy,),
+    ).fetchone()[0]
     actual_executions = store.connection.execute(
-        "SELECT COUNT(*) FROM executions WHERE policy = ? AND task = 1",
+        """
+        SELECT COUNT(*)
+        FROM executions AS e
+        JOIN ccplus_candidates AS c
+          ON c.policy = e.policy
+         AND c.problem_id = e.problem_id
+         AND c.generation_id = e.generation_id
+        WHERE e.policy = ? AND e.task = 1
+          AND c.valid = 1 AND c.status = 'complete'
+        """,
         (policy,),
     ).fetchone()[0]
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -1361,6 +1434,7 @@ def score(store: RunStore) -> dict[str, Any]:
         "actual_generations": len(generation_rows),
         "expected_executions": expected_executions,
         "actual_executions": actual_executions,
+        "oracle_conflicts": oracle_conflicts,
         "usage": usage,
         "macro": macro,
         "problems": per_problem,
