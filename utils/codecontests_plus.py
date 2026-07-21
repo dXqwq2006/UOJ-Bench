@@ -713,7 +713,17 @@ def _limits(metadata: Mapping[str, Any]) -> tuple[int, int]:
 
 
 def _batch_results(base_url: str, payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
-    response = _request_json(base_url, "/custom-test/batch", payload)
+    try:
+        response = _request_json(base_url, "/custom-test/batch", payload)
+    except RuntimeError as exc:
+        tests = payload.get("tests")
+        if "LightCP HTTP 413:" not in str(exc) or not isinstance(tests, list) or len(tests) < 2:
+            raise
+        middle = len(tests) // 2
+        results = {}
+        for chunk in (tests[:middle], tests[middle:]):
+            results.update(_batch_results(base_url, {**payload, "tests": chunk}))
+        return results
     values = response.get("results")
     if not isinstance(values, list):
         raise RuntimeError(f"LightCP batch returned no results: {response}")
