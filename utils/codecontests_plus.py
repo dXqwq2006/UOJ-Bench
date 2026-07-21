@@ -713,10 +713,10 @@ def _limits(metadata: Mapping[str, Any]) -> tuple[int, int]:
 
 
 def _batch_results(base_url: str, payload: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    tests = payload.get("tests")
     try:
         response = _request_json(base_url, "/custom-test/batch", payload)
     except RuntimeError as exc:
-        tests = payload.get("tests")
         oversized = "LightCP HTTP 413:" in str(exc) or "Invalid string length" in str(exc)
         if not oversized or not isinstance(tests, list) or len(tests) < 2:
             raise
@@ -728,7 +728,20 @@ def _batch_results(base_url: str, payload: Mapping[str, Any]) -> dict[str, Mappi
     values = response.get("results")
     if not isinstance(values, list):
         raise RuntimeError(f"LightCP batch returned no results: {response}")
-    return {str(value.get("id")): value for value in values}
+    results = {str(value.get("id")): value for value in values}
+    missing = [test for test in tests or () if str(test.get("id")) not in results]
+    if missing:
+        if not isinstance(tests, list) or len(tests) < 2:
+            raise RuntimeError(
+                f"LightCP batch omitted test {missing[0].get('id')}: {response}"
+            )
+        chunks = [missing]
+        if len(missing) == len(tests):
+            middle = len(missing) // 2
+            chunks = [missing[:middle], missing[middle:]]
+        for chunk in chunks:
+            results.update(_batch_results(base_url, {**payload, "tests": chunk}))
+    return results
 
 
 def _validate_problem(
