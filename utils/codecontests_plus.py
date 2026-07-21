@@ -654,7 +654,11 @@ def audit_programs(
         if batch:
             store.connection.executemany(statement, batch)
             store.connection.commit()
-    store.bind_manifest({"ccplus_compile_audit": counts})
+    previous = store.manifest().get("ccplus_compile_audit")
+    if previous is None:
+        store.bind_manifest({"ccplus_compile_audit": counts})
+    else:
+        counts = previous
     return {"backend": backend, "service": health, **counts}
 
 
