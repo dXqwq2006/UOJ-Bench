@@ -362,6 +362,144 @@ class CodeContestsPlusScoringTests(unittest.TestCase):
 
         self.assertEqual([record[10] for record in records], ["accepted", "wrong_answer"])
 
+    @patch("utils.codecontests_plus._batch_results")
+    @patch("utils.codecontests_plus._run_program")
+    def test_checker_judge_failure_becomes_oracle_conflict(
+        self, run_program, checker
+    ):
+        run_program.return_value = {
+            "0": {"id": "0", "status": "exited", "stdout": "valid"},
+        }
+        checker.return_value = {
+            "0": {
+                "id": "0",
+                "status": "nonzero_exit",
+                "exitStatus": 3,
+                "stderr": "jury answer is invalid",
+            },
+        }
+
+        records = _execute_program(
+            "http://judge",
+            "policy",
+            {
+                "problem_id": PROBLEM_ID,
+                "submission_id": "s",
+                "submission_type": "wrong_submission",
+                "language": "CPP",
+                "checker": "checker",
+            },
+            [{"generation_id": 0, "test_input": "1", "oracle_output": "bad"}],
+        )
+
+        self.assertEqual(records[0][10], "oracle_conflict")
+        self.assertEqual(records[0][12], "jury answer is invalid")
+
+    @patch("utils.codecontests_plus._batch_results")
+    @patch("utils.codecontests_plus._run_program")
+    def test_unknown_checker_failure_remains_fatal(self, run_program, checker):
+        run_program.return_value = {
+            "0": {"id": "0", "status": "exited", "stdout": "output"},
+        }
+        checker.return_value = {
+            "0": {
+                "id": "0",
+                "status": "nonzero_exit",
+                "exitStatus": 4,
+                "stderr": "checker crashed",
+            },
+        }
+
+        with self.assertRaisesRegex(RuntimeError, "checker failed"):
+            _execute_program(
+                "http://judge",
+                "policy",
+                {
+                    "problem_id": PROBLEM_ID,
+                    "submission_id": "s",
+                    "submission_type": "wrong_submission",
+                    "language": "CPP",
+                    "checker": "checker",
+                },
+                [
+                    {
+                        "generation_id": 0,
+                        "test_input": "1",
+                        "oracle_output": "answer",
+                    }
+                ],
+            )
+
+    @patch("utils.codecontests_plus._execute_program")
+    def test_oracle_conflict_invalidates_candidate_and_stops_scheduling(self, execute):
+        def result(_base_url, policy, program, tests):
+            outcome = (
+                "oracle_conflict"
+                if program["submission_id"].endswith(":r:000")
+                else "accepted"
+            )
+            record = list(
+                execution(
+                    program["submission_id"],
+                    program["submission_type"],
+                    outcome,
+                )
+            )
+            record[12] = "jury answer is invalid" if outcome == "oracle_conflict" else ""
+            return [tuple(record)]
+
+        execute.side_effect = result
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.codecontests_plus._load_dataset", return_value=[fixture_row()]
+            ):
+                prepare_dataset(store)
+                audit_all_programs(store)
+                store.bind_manifest({"policies": ["testcase_eval_task1_cot"]})
+                store.connection.execute(
+                    "INSERT INTO materializations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "testcase_eval_task1_cot",
+                        1,
+                        PROBLEM_ID,
+                        "",
+                        0,
+                        "1",
+                        "complete",
+                        "",
+                        1.0,
+                    ),
+                )
+                store.connection.execute(
+                    "INSERT INTO ccplus_candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        "testcase_eval_task1_cot",
+                        PROBLEM_ID,
+                        0,
+                        1,
+                        "complete",
+                        "bad answer",
+                        "",
+                        1.0,
+                    ),
+                )
+                store.connection.commit()
+
+                counts = execute_pending(store, base_url="http://judge", workers=1)
+                candidate = store.connection.execute(
+                    "SELECT valid, status, error FROM ccplus_candidates"
+                ).fetchone()
+                execution_count = store.connection.execute(
+                    "SELECT COUNT(*) FROM executions"
+                ).fetchone()[0]
+
+        self.assertEqual(counts["oracle_conflicts"], 1)
+        self.assertEqual(counts["executions"], 0)
+        self.assertEqual(execute.call_count, 2)
+        self.assertEqual(tuple(candidate)[:2], (0, "oracle_conflict"))
+        self.assertIn(":r:000", candidate["error"])
+        self.assertEqual(execution_count, 0)
+
     def test_invalid_input_remains_in_denominator_and_tpr_tnr_use_checker_results(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -403,12 +541,22 @@ class CodeContestsPlusScoringTests(unittest.TestCase):
                         execution(f"{PROBLEM_ID}:w:001", "wrong_submission", "accepted"),
                     ],
                 )
+                stale = list(
+                    execution(f"{PROBLEM_ID}:w:001", "wrong_submission", "accepted")
+                )
+                stale[4] = 1
+                store.connection.execute(
+                    "INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    tuple(stale),
+                )
                 store.connection.commit()
                 summary = score(store)
                 exported = export_jsonl(store, root / "tests")
 
             metric = summary["macro"]
             self.assertTrue(summary["complete"])
+            self.assertEqual(summary["expected_executions"], 4)
+            self.assertEqual(summary["actual_executions"], 4)
             self.assertEqual(
                 metric,
                 {
