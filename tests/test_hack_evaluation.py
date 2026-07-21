@@ -100,6 +100,35 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(summary["overall"]["retryable_error"], 1)
             self.assertEqual(summary["overall"]["pending_evaluation"], 2)
 
+    def test_changed_import_is_judged_instead_of_reusing_old_score(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset, rollout_dir = prepare(root, imported=True)
+            source = root / "source" / "samples" / "easy-0000.json"
+            record = json.loads(source.read_text())
+            record["messages"][1]["content"] = "```python\nprint(2)\n```"
+            source.write_text(json.dumps(record))
+            calls = []
+
+            def judge(_client, sample, _candidate):
+                calls.append(sample.sample_id)
+                return {"result": {"score": 0}}
+
+            with patch.object(evaluation, "_new_client", return_value=object()), patch.object(
+                evaluation, "_judge_candidate", side_effect=judge
+            ):
+                summary = evaluation.run_batch(
+                    dataset_dir=dataset,
+                    rollout_dir=rollout_dir,
+                    result_dir=root / "result",
+                    workers=1,
+                    resume=True,
+                    progress=False,
+                )
+
+            self.assertEqual(calls, ["easy-0000", "hard-0000"])
+            self.assertEqual(summary["overall"]["successes"], 0)
+
     def test_invalid_first_turn_counts_in_pass_at_1_denominator(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -121,7 +121,7 @@ def _seed_imported(
         raw = messages[1].get("content") if isinstance(messages[1], Mapping) else None
         match = PYTHON_BLOCK.search(raw) if isinstance(raw, str) else None
         if not match or match.group(1) != candidate:
-            raise ValueError(f"imported first turn changed: {sample_id}")
+            continue
         if not isinstance(results, list) or not results or not isinstance(results[0], Mapping):
             continue
         record = {
