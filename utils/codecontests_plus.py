@@ -612,23 +612,43 @@ def audit_programs(
     )
     counts = {"scheduled": len(rows), "complete": 0, "compile_error": 0}
     statement = "INSERT OR REPLACE INTO ccplus_program_audits VALUES (?, ?, ?, ?, ?, ?)"
+    iterator = iter(rows)
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = [pool.submit(_audit_one, base_url, backend, row) for row in rows]
+        pending = set()
+
+        def submit_next() -> bool:
+            try:
+                row = next(iterator)
+            except StopIteration:
+                return False
+            pending.add(pool.submit(_audit_one, base_url, backend, row))
+            return True
+
+        for _ in range(workers * 2):
+            if not submit_next():
+                break
+
         batch = []
-        for completed, future in enumerate(futures, 1):
-            record = future.result()
-            counts[record[2]] += 1
-            batch.append(record)
-            if len(batch) >= 100:
-                store.connection.executemany(statement, batch)
-                store.connection.commit()
-                batch.clear()
-            if completed % 100 == 0 or completed == len(futures):
-                print(
-                    f"compile audit {completed}/{len(futures)} "
-                    f"complete={counts['complete']} errors={counts['compile_error']}",
-                    flush=True,
-                )
+        completed_count = 0
+        while pending:
+            completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+            for future in completed:
+                record = future.result()
+                completed_count += 1
+                counts[record[2]] += 1
+                batch.append(record)
+                if len(batch) >= 100:
+                    store.connection.executemany(statement, batch)
+                    store.connection.commit()
+                    batch.clear()
+                submit_next()
+                if completed_count % 100 == 0 or completed_count == len(rows):
+                    print(
+                        f"compile audit {completed_count}/{len(rows)} "
+                        f"complete={counts['complete']} "
+                        f"errors={counts['compile_error']}",
+                        flush=True,
+                    )
         if batch:
             store.connection.executemany(statement, batch)
             store.connection.commit()
