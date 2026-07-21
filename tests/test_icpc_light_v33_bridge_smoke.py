@@ -14,7 +14,7 @@ from scripts.smoke_icpc_light_v33_bridge import DEFAULT_SKILL_BUNDLE, run_smoke
 
 
 class EndToEndSmokeTests(unittest.TestCase):
-    def test_generation_and_hacking_pipeline_wiring(self) -> None:
+    def test_supported_pipeline_wiring(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "smoke"
             clean_environment = {
@@ -39,7 +39,9 @@ class EndToEndSmokeTests(unittest.TestCase):
             self.assertTrue(report["hacking"]["passed"])
             self.assertEqual(report["hacking"]["semantically_exposed"], 2)
             self.assertEqual(len(report["hacking"]["pipeline_receipts"]), 2)
-            self.assertEqual(report["isolation"]["job_count"], 3)
+            self.assertTrue(report["fault_exposure"]["passed"])
+            self.assertEqual(report["fault_exposure"]["candidate_format"], "raw_input")
+            self.assertEqual(report["isolation"]["job_count"], 4)
             self.assertFalse(report["isolation"]["model_called"])
             self.assertFalse(report["isolation"]["uoj_called"])
 

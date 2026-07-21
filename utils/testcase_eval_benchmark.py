@@ -271,6 +271,79 @@ def _load_dataset(key: str, cache_dir: str | None) -> Any:
     )
 
 
+def _pipeline_signature(message: Any) -> str | None:
+    if not isinstance(message, Mapping):
+        return None
+    identity = message.get("pipeline_identity")
+    if not isinstance(identity, Mapping):
+        return None
+    signature = identity.get("pipeline_signature_sha256")
+    if signature is None:
+        return None
+    if (
+        not isinstance(signature, str)
+        or len(signature) != 64
+        or any(character not in "0123456789abcdef" for character in signature)
+    ):
+        raise ValueError("generation message has an invalid pipeline signature")
+    return signature
+
+
+def _bind_pipeline_signature(
+    store: RunStore,
+    *,
+    policy: str,
+    message: Any,
+    bound: dict[str, str],
+) -> None:
+    signature = _pipeline_signature(message)
+    if signature is None:
+        return
+    existing = bound.get(policy)
+    if existing is not None:
+        if existing != signature:
+            raise ValueError(
+                f"result database mixes pipeline identities for policy {policy}: "
+                f"{existing} != {signature}"
+            )
+        return
+    store.bind_manifest({f"solver_pipeline_signature:{policy}": signature})
+    bound[policy] = signature
+
+
+def _existing_pipeline_signatures(store: RunStore) -> dict[str, str]:
+    bound: dict[str, str] = {}
+    prefix = "solver_pipeline_signature:"
+    for key, value in store.manifest().items():
+        if not key.startswith(prefix):
+            continue
+        policy = key.removeprefix(prefix)
+        if not policy or not isinstance(value, str):
+            raise ValueError("result database has an invalid pipeline manifest key")
+        signature = _pipeline_signature(
+            {"pipeline_identity": {"pipeline_signature_sha256": value}}
+        )
+        assert signature is not None
+        bound[policy] = signature
+    rows = list(
+        store.connection.execute(
+            "SELECT policy, message_json FROM generations WHERE status = 'complete'"
+        )
+    )
+    for row in rows:
+        try:
+            message = json.loads(row["message_json"])
+        except json.JSONDecodeError as exc:
+            raise ValueError("stored generation message is not valid JSON") from exc
+        _bind_pipeline_signature(
+            store,
+            policy=row["policy"],
+            message=message,
+            bound=bound,
+        )
+    return bound
+
+
 def _problem_id(record: Mapping[str, Any]) -> str:
     extra = record.get("extra_info")
     if isinstance(extra, Mapping) and extra.get("problem_id") is not None:
@@ -687,6 +760,7 @@ def _generate_replicated(
     workers: int,
     request_replicas: int,
     counts: dict[str, int],
+    pipeline_signatures: dict[str, str],
 ) -> None:
     """Race bounded request replicas and persist only the first success."""
     job_iterator = iter(enumerate(jobs))
@@ -736,6 +810,12 @@ def _generate_replicated(
                 if state["selected"] is None and record is not None:
                     if record["status"] == "complete":
                         state["selected"] = record
+                        _bind_pipeline_signature(
+                            store,
+                            policy=record["policy"],
+                            message=record["message"],
+                            bound=pipeline_signatures,
+                        )
                         store.save_generation(record)
                         counts["complete"] += 1
                         completed_jobs += 1
@@ -789,6 +869,7 @@ def generate(
             "model_request": effective_model_request(),
         }
     )
+    pipeline_signatures = _existing_pipeline_signatures(store)
     jobs = generation_jobs(
         store,
         model=model,
@@ -809,6 +890,7 @@ def generate(
             workers=workers,
             request_replicas=request_replicas,
             counts=counts,
+            pipeline_signatures=pipeline_signatures,
         )
         return counts
 
@@ -816,6 +898,13 @@ def generate(
         futures = {pool.submit(_generate_one, job, model): job for job in jobs}
         for completed, future in enumerate(as_completed(futures), 1):
             record = future.result()
+            if record["status"] == "complete":
+                _bind_pipeline_signature(
+                    store,
+                    policy=record["policy"],
+                    message=record["message"],
+                    bound=pipeline_signatures,
+                )
             store.save_generation(record)
             counts[record["status"]] += 1
             if completed % 10 == 0 or completed == len(futures):

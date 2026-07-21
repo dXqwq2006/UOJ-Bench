@@ -61,10 +61,12 @@ can use any model stack without adding model code to `utils/` or the runners.
 
 `solution/icpc_light_v33_bridge/` connects the frozen ICPC Light v3.3 skills
 pipeline through a separate JSON process boundary. It supports one-shot UOJ
-Generation and Hacking, requires the exact model contract `gpt-5.6-sol` with
-reasoning effort `ultra`, and fails closed for Repair, feedback rounds, and the
-Fault tasks. The bridge config pins the complete skill tree hash and records a
-hash-bound pipeline identity with every candidate.
+Generation and Hacking plus TestCase-Eval Task 2 Fault Exposure. It requires
+the exact model contract `gpt-5.6-sol` with reasoning effort `ultra`, and fails
+closed for Repair, feedback rounds, and Fault Coverage. The bridge config pins
+the complete skill tree hash and records a hash-bound pipeline identity with
+every candidate; TestCase-Eval result databases also bind its stable pipeline
+signature before persisting a completed generation.
 
 Run the credential-free integration smoke from the repository root:
 
@@ -76,9 +78,9 @@ env -u UOJ_API_KEY -u TATU_API_KEY -u OPENAI_API_KEY \
   --output-root /absolute/system-filesystem/root/icpc-light-v33-smoke
 ```
 
-This deterministic test executes the real v3.3 sweep/review scripts and the
-native UOJ Hacking rollout runner with injected workers. It makes no model or
-UOJ request and is not a benchmark score. See
+This deterministic test executes the real v3.3 sweep/review scripts, the native
+UOJ Hacking rollout runner, and a typed Fault Exposure job with injected
+workers. It makes no model or UOJ request and is not a benchmark score. See
 [the integration guide](docs/ICPC_LIGHT_V33_BRIDGE.zh-CN.md) and
 [zero-mount server handoff](docs/ICPC_LIGHT_V33_ZERO_MOUNT_HANDOFF.zh-CN.md)
 before configuring a production agent command.
@@ -171,6 +173,22 @@ container and never calls UOJ. SQLite stores every prompt, raw response,
 candidate, usage record, materialized input, and execution result with stable
 resume keys. Request failures are recorded and are retried only with
 `--retry-errors`.
+
+`icpc_light_v33_bridge` is an additional non-paper Task 2 competitor. After
+preparing its bridge config as described below, run it through the same native
+TestCase-Eval generation and judge phases:
+
+```bash
+export ICPC_LIGHT_UOJ_BRIDGE="$PWD/integrations/icpc_light_v33/bin/icpc-light-uoj-bridge"
+export ICPC_LIGHT_UOJ_BRIDGE_CONFIG=/absolute/control/bridge-config.json
+python -m scripts.test_testcase_eval_task2 --phase generate \
+  --result-dir "$RESULT" --model gpt-5.6-sol --workers 16 \
+  --policy icpc_light_v33_bridge
+```
+
+Do not pass `--paper` to that competitor run: the solver intentionally uses the
+ICPC Light prompt/pipeline, while Task 2's dataset, candidate materialization,
+local evaluator, and score remain unchanged.
 
 For a three-problem GPT-5.6 smoke using both Task 2 policies:
 

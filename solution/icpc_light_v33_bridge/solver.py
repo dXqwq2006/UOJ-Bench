@@ -20,6 +20,7 @@ import time
 from typing import Any, Mapping, Optional
 
 from solution.api import (
+    FaultExposureInput,
     GenerationInput,
     HackCandidate,
     HackingInput,
@@ -27,6 +28,8 @@ from solution.api import (
     SolverCapabilities,
     SolverFeedback,
     SolverTurn,
+    TestCaseCandidate,
+    TestCaseFormat,
 )
 
 
@@ -287,6 +290,7 @@ def _bind_pipeline_identity(
         "bridge_config_sha256",
         "agent_command",
         "candidate_sha256",
+        "pipeline_signature_sha256",
     }
     if set(identity) != required_fields:
         raise BridgeProtocolError("bridge response pipeline identity fields are invalid")
@@ -298,6 +302,7 @@ def _bind_pipeline_identity(
         "copied_skills_sha256",
         "bridge_config_sha256",
         "candidate_sha256",
+        "pipeline_signature_sha256",
     )
     if identity.get("schema_version") != 1:
         raise BridgeProtocolError("bridge response has an invalid pipeline identity schema")
@@ -362,6 +367,8 @@ def _bind_pipeline_identity(
             allow_nan=False,
         ).encode("utf-8")
     ).hexdigest()
+    if identity.get("pipeline_signature_sha256") != signature:
+        raise BridgeProtocolError("bridge response has an invalid pipeline signature")
     global _FROZEN_PIPELINE_SIGNATURE
     with _BINDING_LOCK:
         if _FROZEN_PIPELINE_SIGNATURE is None:
@@ -547,7 +554,7 @@ class _BridgeSession:
                 raise BridgeProtocolError("generation bridge returned the wrong candidate kind")
             content = _candidate_text(candidate_raw.get("content"), "solution")
             candidate: Any = SolutionCandidate(content)
-        else:
+        elif self.task == "hacking":
             if set(candidate_raw) != {"kind", "format", "content"}:
                 raise BridgeProtocolError("hacking candidate fields are invalid")
             if candidate_raw.get("kind") != "hack":
@@ -559,6 +566,23 @@ class _BridgeSession:
             elif candidate_format != "python_generator":
                 raise BridgeProtocolError("hack candidate format is unsupported")
             candidate = HackCandidate(content)
+        elif self.task == "fault_exposure":
+            if set(candidate_raw) != {"kind", "format", "content"}:
+                raise BridgeProtocolError("fault exposure candidate fields are invalid")
+            if candidate_raw.get("kind") != "test_case":
+                raise BridgeProtocolError(
+                    "fault exposure bridge returned the wrong candidate kind"
+                )
+            content = _candidate_text(candidate_raw.get("content"), "test case")
+            try:
+                candidate_format = TestCaseFormat(candidate_raw.get("format"))
+            except (TypeError, ValueError) as exc:
+                raise BridgeProtocolError(
+                    "fault exposure candidate format is unsupported"
+                ) from exc
+            candidate = TestCaseCandidate(content, candidate_format)
+        else:
+            raise BridgeProtocolError(f"unsupported bridge task: {self.task}")
 
         if hashlib.sha256(
             _candidate_text(candidate_raw.get("content"), "candidate").encode("utf-8")
@@ -575,7 +599,7 @@ class _BridgeSession:
 
 
 class ICLightBridgeSolver:
-    """One-shot public-only Generation/Hacking pipeline adapter."""
+    """One-shot public-only Generation/Hacking/Fault Exposure adapter."""
 
     capabilities = SolverCapabilities(
         generation=True,
@@ -585,7 +609,7 @@ class ICLightBridgeSolver:
         hacking_feedback=False,
         repair_feedback=False,
         fault_coverage=False,
-        fault_exposure=False,
+        fault_exposure=True,
     )
 
     def __init__(self, model: str):
@@ -639,5 +663,22 @@ class ICLightBridgeSolver:
     def start_fault_coverage(self, task: Any) -> Any:
         raise NotImplementedError("use a dedicated variable-suite benchmark runner")
 
-    def start_fault_exposure(self, task: Any) -> Any:
-        raise NotImplementedError("fault exposure is not enabled in this adapter profile")
+    def start_fault_exposure(self, task: FaultExposureInput) -> _BridgeSession:
+        return _BridgeSession(
+            "fault_exposure",
+            {
+                "schema_version": 1,
+                "task": "fault_exposure",
+                "model": self.model,
+                "reasoning_effort": ICPC_LIGHT_REASONING_EFFORT,
+                "input": {
+                    "problem_id": task.problem_id,
+                    "problem_statement": task.problem_statement,
+                    "submission_id": task.submission_id,
+                    "submission_code": task.submission_code,
+                    "submission_language": task.submission_language,
+                    "metadata": _public_metadata(task.metadata),
+                },
+            },
+            expected_config_binding=self._expected_config_binding,
+        )

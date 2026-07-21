@@ -13,7 +13,7 @@
   ],
   "properties": {
     "schema_version": {"const": 1},
-    "task": {"enum": ["generation", "hacking"]},
+    "task": {"enum": ["generation", "hacking", "fault_exposure"]},
     "model": {"const": "gpt-5.6-sol"},
     "reasoning_effort": {"const": "ultra"},
     "input": {
@@ -23,6 +23,7 @@
         "problem_id": {"type": ["integer", "string"]},
         "problem_statement": {"type": "string", "minLength": 1},
         "language": {"type": "string", "minLength": 1},
+        "submission_id": {"type": ["integer", "string"]},
         "submission_code": {"type": "string", "minLength": 1},
         "submission_language": {"type": "string", "minLength": 1},
         "chinese": {"type": "boolean"},
@@ -61,6 +62,7 @@
             ],
             "not": {
               "anyOf": [
+                {"required": ["submission_id"]},
                 {"required": ["submission_code"]},
                 {"required": ["submission_language"]}
               ]
@@ -81,7 +83,31 @@
               "submission_language",
               "chinese",
               "metadata"
-            ]
+            ],
+            "not": {"required": ["submission_id"]}
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"task": {"const": "fault_exposure"}}},
+      "then": {
+        "properties": {
+          "input": {
+            "required": [
+              "problem_id",
+              "problem_statement",
+              "submission_id",
+              "submission_code",
+              "submission_language",
+              "metadata"
+            ],
+            "not": {
+              "anyOf": [
+                {"required": ["language"]},
+                {"required": ["chinese"]}
+              ]
+            }
           }
         }
       }

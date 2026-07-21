@@ -20,7 +20,13 @@ sys.path.insert(0, str(BRIDGE_SRC))
 import solution
 
 from solution import load_solver
-from solution.api import GenerationInput, HackingInput, require_solver_support
+from solution.api import (
+    FaultExposureInput,
+    GenerationInput,
+    HackingInput,
+    TestCaseFormat,
+    require_solver_support,
+)
 from solution.icpc_light_v33_bridge import solver as bridge_solver
 from solution.icpc_light_v33_bridge.solver import (
     BRIDGE_CONFIG_ENV,
@@ -108,6 +114,28 @@ def bind_fake_response(
             candidate["content"].encode("utf-8")
         ).hexdigest(),
     }
+    signature_value = {
+        key: bound["pipeline_identity"][key]
+        for key in (
+            "profile",
+            "model",
+            "reasoning_effort",
+            "skill_bundle_sha256",
+            "expected_skill_bundle_sha256",
+            "copied_skills_sha256",
+            "bridge_config_sha256",
+            "agent_command",
+        )
+    }
+    bound["pipeline_identity"]["pipeline_signature_sha256"] = hashlib.sha256(
+        json.dumps(
+            signature_value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
     bound["message"] = {
         "role": "assistant",
         "content": str(response.get("raw_text", "")),
@@ -276,6 +304,59 @@ class SolverAdapterTests(unittest.TestCase):
             exec(turn.candidate.generator, namespace)
         write.assert_called_once_with(raw_input)
 
+    def test_fault_exposure_preserves_testcase_eval_candidate_format(self) -> None:
+        raw_input = "3\n1 2 3\n"
+        response = {
+            "schema_version": 1,
+            "status": "completed",
+            "candidate": {
+                "kind": "test_case",
+                "format": "raw_input",
+                "content": raw_input,
+            },
+            "transcript": [],
+            "usage": {},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config, config_sha256 = fake_adapter_config(root)
+            expected_request = {
+                "schema_version": 1,
+                "task": "fault_exposure",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "ultra",
+                "input": {
+                    "problem_id": "2000A",
+                    "problem_statement": "statement",
+                    "submission_id": 17,
+                    "submission_code": "wrong source",
+                    "submission_language": "Python 3",
+                    "metadata": {"difficulty": "hard"},
+                },
+            }
+            bridge = fake_bridge(
+                root, bind_fake_response(response, config_sha256, expected_request)
+            )
+            with patch.dict(
+                os.environ,
+                {BRIDGE_ENV: str(bridge), BRIDGE_CONFIG_ENV: str(config)},
+            ):
+                solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
+                require_solver_support(solver, "fault_exposure")
+                turn = solver.start_fault_exposure(
+                    FaultExposureInput(
+                        "2000A",
+                        "statement",
+                        17,
+                        "wrong source",
+                        "Python 3",
+                        {"difficulty": "hard", "correct_code": "private source"},
+                    )
+                ).next()
+
+        self.assertEqual(turn.candidate.content, raw_input)
+        self.assertEqual(turn.candidate.format, TestCaseFormat.RAW_INPUT)
+
     def test_wrong_model_and_bridge_failures_are_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "requires model"):
             load_solver("icpc_light_v33_bridge", "gpt-oss-120b")
@@ -390,7 +471,7 @@ class BridgeRuntimeTests(unittest.TestCase):
         config_path.chmod(0o600)
         return config_path, bundle_sha
 
-    def test_generation_and_hacking_runtime_contracts(self) -> None:
+    def test_generation_hacking_and_fault_exposure_runtime_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             config, bundle_sha = self._fixture(root)
@@ -421,17 +502,37 @@ class BridgeRuntimeTests(unittest.TestCase):
                     "metadata": {},
                 },
             }
+            fault_exposure = {
+                "schema_version": 1,
+                "task": "fault_exposure",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "ultra",
+                "input": {
+                    "problem_id": "2000A",
+                    "problem_statement": "statement",
+                    "submission_id": 17,
+                    "submission_code": "wrong",
+                    "submission_language": "Python 3",
+                    "metadata": {},
+                },
+            }
             with patch.dict(os.environ, {CONFIG_ENV: str(config)}):
                 generation_response = execute_request(generation)
                 hacking_response = execute_request(hacking)
+                fault_response = execute_request(fault_exposure)
 
             self.assertEqual(generation_response["candidate"]["kind"], "solution")
             self.assertEqual(hacking_response["candidate"]["format"], "raw_input")
-            for response in (generation_response, hacking_response):
+            self.assertEqual(fault_response["candidate"]["kind"], "test_case")
+            self.assertEqual(fault_response["candidate"]["format"], "raw_input")
+            for response in (generation_response, hacking_response, fault_response):
                 identity = response["pipeline_identity"]
                 self.assertEqual(identity["skill_bundle_sha256"], bundle_sha)
                 self.assertEqual(identity["expected_skill_bundle_sha256"], bundle_sha)
                 self.assertRegex(identity["copied_skills_sha256"], r"^[0-9a-f]{64}$")
+                self.assertRegex(
+                    identity["pipeline_signature_sha256"], r"^[0-9a-f]{64}$"
+                )
 
     def test_runtime_rejects_skill_bundle_drift(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

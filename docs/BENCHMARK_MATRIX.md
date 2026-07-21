@@ -75,10 +75,12 @@ TestCase-Eval 的 accepted submissions 用于 oracle 共识，不计作要杀死
 
 - 出处：仓库内 manifest/lock 固定的 ICPC Light v3.3 skill bundle 与独立 JSON
   bridge；配置固定精确 `gpt-5.6-sol`、`reasoning_effort=ultra`。
-- 支持 UOJ Generation 和 Hacking 的 one-shot typed contract；不支持 Repair、
-  judge feedback 或 TestCase-Eval 两项任务。
+- 支持 UOJ Generation、Hacking 和 TestCase-Eval Task 2 Fault Exposure 的
+  one-shot typed contract；不支持 Repair、judge feedback 或 Fault Coverage。
 - Hacking pipeline 可以产出一个 raw input，adapter 按 UOJ-Bench 合同机械包装成
   Python 3 generator；最终评分仍由原 UOJ evaluator 完成。
+- Task 2 保留 raw input / Python generator 的 TestCase-Eval candidate 格式，由
+  TestCase-Eval 本地执行与评分，不调用 UOJ。结果库绑定 bridge pipeline signature。
 - deterministic smoke 已覆盖 Generation 的 2 neutral + 2 deceptive sweep/blind
   review，以及 Easy C++、Hard Python3 两条 Hacking rollout。该 smoke 注入测试
   worker，不调用模型或 UOJ，不是 benchmark 成绩。
@@ -94,7 +96,7 @@ TestCase-Eval 的 accepted submissions 用于 oracle 共识，不计作要杀死
 | UOJ Hacking，agent | **官方 baseline** | 不支持反馈 | 不支持反馈 |
 | UOJ Repair，单轮/agent | **官方 baseline** | 不支持 | 不支持 |
 | TestCase-Eval Task 1 | 不支持 | **论文流程** | 不支持 |
-| TestCase-Eval Task 2 | 跨框架 control | **论文流程** | 不支持 |
+| TestCase-Eval Task 2 | 跨框架 control | **论文流程** | one-shot pipeline |
 
 `solution/llm/` 是共享的 TATU/OpenRouter/OpenAI-compatible transport，不是一个
 solver，也不应作为 competitor 计数。模型名、reasoning effort、token limit、

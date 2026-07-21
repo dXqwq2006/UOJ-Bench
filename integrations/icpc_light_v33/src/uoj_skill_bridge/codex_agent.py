@@ -1,4 +1,4 @@
-"""Reference public-only Codex agent for Generation and Hacking task slices.
+"""Reference public-only Codex agent for supported one-shot task slices.
 
 Production deployment is expected to launch this inside the audited zero-mount
 agent boundary, where the credential relay configuration already exists.  It
@@ -46,14 +46,26 @@ algorithm, and write exactly one complete GNU C++20 submission to
 output/main.cpp. This task asks for a solver candidate, not a new problem or a
 full ICPC package. Do not create another file under output/.
 """
-    return common + """
+    if task == "hacking":
+        return common + """
 This is a UOJ-Bench one-shot Hacking slice. Read surface/statement.md,
 surface/task.json for `submission_language`, and the exact target program in
-surface/wrong-source.txt. Find one valid complete stdin that
-makes that exact program fail the stated problem. Write exactly one artifact:
-prefer raw bytes in output/candidate.in; use output/generator.py only if a
-static input is genuinely unsuitable. Do not write or seek an accepted source,
-an answer file, or another file under output/.
+surface/wrong-source.txt. Find one valid complete stdin that makes that exact
+program fail the stated problem. Write exactly one artifact: prefer raw bytes
+in output/candidate.in; use output/generator.py only if a static input is
+genuinely unsuitable. Do not write or seek an accepted source, an answer file,
+or another file under output/.
+"""
+    return common + """
+This is a TestCase-Eval Task 2 Fault Exposure slice. Read
+surface/statement.md, surface/task.json for `submission_id` and
+`submission_language`, and the exact target program in
+surface/wrong-source.txt. Find one valid complete stdin that makes that exact
+program fail the stated problem. Write exactly one artifact: prefer raw bytes
+in output/candidate.in; use output/generator.py only if a static input is
+genuinely unsuitable. Do not write or seek an accepted source, an answer file,
+or another file under output/. The benchmark will run its own local evaluator;
+do not call UOJ or any external judge.
 """
 
 
@@ -93,7 +105,11 @@ def _write_result(workspace: Path, value: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task", choices=("generation", "hacking"), required=True)
+    parser.add_argument(
+        "--task",
+        choices=("generation", "hacking", "fault_exposure"),
+        required=True,
+    )
     parser.add_argument("--workspace", type=Path, required=True)
     args = parser.parse_args(argv)
     workspace = args.workspace.resolve(strict=True)

@@ -226,6 +226,60 @@ class StoreAndScoreTests(unittest.TestCase):
         self.assertEqual((row["status"], row["candidate"]), ("complete", "first"))
         self.assertEqual(request.call_count, 4)
 
+    def test_generation_manifest_rejects_mixed_pipeline_signatures(self):
+        job = GenerationJob(
+            policy="testcase_eval",
+            task=2,
+            problem_id="2000A",
+            problem_statement="Problem",
+            submission_id="w",
+            submission_code="print(1)",
+            submission_language="Python 3",
+            generation_id=0,
+            metadata={},
+        )
+
+        def signed_record(signature):
+            record = generation_record(2, "w", 0)
+            record["message"] = {
+                "pipeline_identity": {
+                    "pipeline_signature_sha256": signature,
+                }
+            }
+            return record
+
+        first = "a" * 64
+        second = "b" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            with RunStore(Path(directory) / "run.sqlite3") as store, patch(
+                "utils.testcase_eval_benchmark.generation_jobs",
+                return_value=[job],
+            ), patch(
+                "utils.testcase_eval_benchmark._generate_one",
+                side_effect=(signed_record(first), signed_record(second)),
+            ):
+                generate(
+                    store,
+                    model="model",
+                    policies=("testcase_eval",),
+                    tasks=(2,),
+                    workers=1,
+                )
+                with self.assertRaisesRegex(ValueError, "mixes pipeline identities"):
+                    generate(
+                        store,
+                        model="model",
+                        policies=("testcase_eval",),
+                        tasks=(2,),
+                        workers=1,
+                    )
+                self.assertEqual(
+                    store.manifest()[
+                        "solver_pipeline_signature:testcase_eval"
+                    ],
+                    first,
+                )
+
     def test_score_matches_task1_union_and_task2_target_exposure(self):
         with tempfile.TemporaryDirectory() as directory:
             with RunStore(Path(directory) / "run.sqlite3") as store:

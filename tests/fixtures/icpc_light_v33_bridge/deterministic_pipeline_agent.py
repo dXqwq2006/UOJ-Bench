@@ -203,9 +203,9 @@ def _generation(workspace: Path, worker: Path) -> dict[str, Any]:
     }
 
 
-def _hacking(workspace: Path, worker: Path) -> dict[str, Any]:
+def _adversarial(workspace: Path, worker: Path, task: str) -> dict[str, Any]:
     started = time.monotonic()
-    stage = workspace / "scratch" / "hacking-task-slice"
+    stage = workspace / "scratch" / f"{task}-task-slice"
     public = stage / "public"
     public.mkdir(parents=True)
     surface = workspace / "surface"
@@ -215,23 +215,23 @@ def _hacking(workspace: Path, worker: Path) -> dict[str, Any]:
         before[name] = _sha256_file(source)
         shutil.copy2(source, public / name, follow_symlinks=False)
         if _sha256_file(public / name) != before[name]:
-            raise RuntimeError(f"Hacking public copy changed {name}")
+            raise RuntimeError(f"{task} public copy changed {name}")
     python = str(Path(sys.executable).resolve(strict=True))
     _run(
         [python, str(worker), "--mode", "hack"],
         cwd=stage,
-        label="public-only Hacking task slice",
+        label=f"public-only {task} task slice",
     )
     for name, digest in before.items():
         if _sha256_file(public / name) != digest:
-            raise RuntimeError(f"Hacking worker modified public file {name}")
+            raise RuntimeError(f"{task} worker modified public file {name}")
     candidate = stage / "output" / "candidate.in"
     if candidate.is_symlink() or not candidate.is_file():
-        raise RuntimeError("Hacking task slice produced no regular candidate.in")
+        raise RuntimeError(f"{task} task slice produced no regular candidate.in")
     shutil.copy2(candidate, workspace / "output" / "candidate.in", follow_symlinks=False)
     receipt = {
         "schema_version": 1,
-        "execution_mode": "test-override-public-only-hacking-slice",
+        "execution_mode": f"test-override-public-only-{task}-slice",
         "public_files": before,
         "candidate_sha256": _sha256_file(candidate),
         "duration_seconds": round(time.monotonic() - started, 3),
@@ -243,7 +243,11 @@ def _hacking(workspace: Path, worker: Path) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--worker", type=Path, required=True)
-    parser.add_argument("--task", choices=("generation", "hacking"), required=True)
+    parser.add_argument(
+        "--task",
+        choices=("generation", "hacking", "fault_exposure"),
+        required=True,
+    )
     parser.add_argument("--workspace", type=Path, required=True)
     args = parser.parse_args()
     workspace = args.workspace.resolve(strict=True)
@@ -256,7 +260,7 @@ def main() -> int:
     detail = (
         _generation(workspace, worker)
         if args.task == "generation"
-        else _hacking(workspace, worker)
+        else _adversarial(workspace, worker, args.task)
     )
     result = {
         "schema_version": 1,

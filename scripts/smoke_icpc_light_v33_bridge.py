@@ -1,4 +1,4 @@
-"""Run a TEST-ONLY Generation/Hacking pipeline smoke with no model or UOJ calls."""
+"""Run a TEST-ONLY supported-task pipeline smoke with no model or UOJ calls."""
 
 from __future__ import annotations
 
@@ -180,7 +180,7 @@ def _load_uoj(
     import solution
 
     from solution import load_solver
-    from solution.api import GenerationInput, require_solver_support
+    from solution.api import FaultExposureInput, GenerationInput, require_solver_support
     from solution.icpc_light_v33_bridge.solver import (
         BRIDGE_CONFIG_ENV,
         BRIDGE_ENV,
@@ -206,6 +206,7 @@ def _load_uoj(
     return (
         load_solver,
         GenerationInput,
+        FaultExposureInput,
         require_solver_support,
         (BRIDGE_ENV, BRIDGE_CONFIG_ENV),
         run_hack_rollout_batch,
@@ -421,6 +422,7 @@ def run_smoke(
     (
         load_solver,
         GenerationInput,
+        FaultExposureInput,
         require_solver_support,
         env_names,
         rollout,
@@ -435,6 +437,7 @@ def run_smoke(
         solver = load_solver("icpc_light_v33_bridge", "gpt-5.6-sol")
         require_solver_support(solver, "generation")
         require_solver_support(solver, "hacking")
+        require_solver_support(solver, "fault_exposure")
         generation_turn = solver.start_generation(
             GenerationInput(
                 900000,
@@ -478,8 +481,35 @@ def run_smoke(
         }:
             raise RuntimeError(f"unexpected Hacking rollout summary: {summary['overall']}")
 
+        fault_exposure_turn = solver.start_fault_exposure(
+            FaultExposureInput(
+                "900003",
+                STATEMENT,
+                17,
+                WRONG_SOURCE,
+                "C++20",
+                {"difficulty": "hard", "title_en": "Add Two Integers Task 2 Smoke"},
+            )
+        ).next()
+        if fault_exposure_turn.candidate is None:
+            raise RuntimeError(
+                "fault exposure returned no candidate: "
+                f"{fault_exposure_turn.error}"
+            )
+
     wrong_binary = _compile(WRONG_SOURCE, build / "wrong")
     reference_binary = _compile(REFERENCE_SOURCE, build / "reference")
+    fault_candidate = fault_exposure_turn.candidate
+    if fault_candidate.format.value == "raw_input":
+        fault_input = fault_candidate.content
+    elif fault_candidate.format.value == "python_generator":
+        fault_input = _generator_output(fault_candidate.content)
+    else:
+        raise RuntimeError("fault exposure returned an unsupported candidate format")
+    fault_wrong_output = _run(wrong_binary, fault_input)
+    fault_expected_output = _run(reference_binary, fault_input)
+    if fault_wrong_output == fault_expected_output:
+        raise RuntimeError("fault exposure did not expose the smoke wrong solution")
     hacking_records = []
     for path in sorted((rollout_dir / "samples").glob("*.json")):
         record = json.loads(path.read_text(encoding="utf-8"))
@@ -516,11 +546,12 @@ def run_smoke(
         )
 
     job_dirs = sorted(path for path in workspaces.iterdir() if path.is_dir())
-    if len(job_dirs) != 3:
-        raise RuntimeError(f"expected three isolated jobs, found {len(job_dirs)}")
+    if len(job_dirs) != 4:
+        raise RuntimeError(f"expected four isolated jobs, found {len(job_dirs)}")
     saw_python_hack = False
     generation_pipeline_detail: dict[str, Any] | None = None
     hacking_pipeline_details: list[dict[str, Any]] = []
+    fault_exposure_pipeline_detail: dict[str, Any] | None = None
     for job in job_dirs:
         names = {path.name for path in (job / "surface").iterdir()}
         if "correct.cpp" in names or "reference.cpp" in names:
@@ -542,10 +573,19 @@ def run_smoke(
             ):
                 raise RuntimeError("Generation did not complete the 2+2 sweep and review smoke")
             generation_pipeline_detail = detail
-        else:
+        elif request["task"] == "hacking":
             if detail.get("execution_mode") != "test-override-public-only-hacking-slice":
                 raise RuntimeError("Hacking did not complete its public-only task slice")
             hacking_pipeline_details.append(detail)
+        else:
+            if (
+                detail.get("execution_mode")
+                != "test-override-public-only-fault_exposure-slice"
+            ):
+                raise RuntimeError(
+                    "Fault Exposure did not complete its public-only task slice"
+                )
+            fault_exposure_pipeline_detail = detail
         if request["task"] == "hacking" and request["input"]["submission_language"] == "Python3":
             saw_python_hack = True
             materialized = (job / "surface" / "wrong-source.txt").read_text(encoding="utf-8")
@@ -556,8 +596,12 @@ def run_smoke(
             raise RuntimeError("a job receipt is not completed")
     if not saw_python_hack:
         raise RuntimeError("smoke did not exercise a non-C++ Hacking target")
-    if generation_pipeline_detail is None or len(hacking_pipeline_details) != 2:
-        raise RuntimeError("pipeline detail count does not match the three smoke jobs")
+    if (
+        generation_pipeline_detail is None
+        or len(hacking_pipeline_details) != 2
+        or fault_exposure_pipeline_detail is None
+    ):
+        raise RuntimeError("pipeline detail count does not match the four smoke jobs")
 
     report = {
         "schema_version": 1,
@@ -589,6 +633,19 @@ def run_smoke(
             "pipeline_receipts": [
                 item["receipt_sha256"] for item in hacking_pipeline_details
             ],
+        },
+        "fault_exposure": {
+            "passed": True,
+            "candidate_format": fault_candidate.format.value,
+            "candidate_sha256": _sha256(fault_candidate.content),
+            "input_sha256": _sha256(fault_input),
+            "wrong_output": fault_wrong_output,
+            "expected_output": fault_expected_output,
+            "receipt_sha256": fault_exposure_turn.message["receipt_sha256"],
+            "pipeline_identity_sha256": _canonical_sha256(
+                fault_exposure_turn.message["pipeline_identity"]
+            ),
+            "pipeline": fault_exposure_pipeline_detail,
         },
         "isolation": {
             "job_count": len(job_dirs),

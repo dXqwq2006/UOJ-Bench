@@ -29,6 +29,16 @@
             "format": {"enum": ["python_generator", "raw_input"]},
             "content": {"type": "string", "minLength": 1}
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "format", "content"],
+          "properties": {
+            "kind": {"const": "test_case"},
+            "format": {"enum": ["python_generator", "raw_input"]},
+            "content": {"type": "string", "minLength": 1}
+          }
         }
       ]
     },
@@ -66,7 +76,8 @@
         "skill_bytes",
         "bridge_config_sha256",
         "agent_command",
-        "candidate_sha256"
+        "candidate_sha256",
+        "pipeline_signature_sha256"
       ],
       "properties": {
         "schema_version": {"const": 1},
@@ -95,7 +106,11 @@
             }
           }
         },
-        "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        "candidate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "pipeline_signature_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     }
   },

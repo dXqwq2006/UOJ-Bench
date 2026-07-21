@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "status": {"enum": ["completed", "retryable_error"]},
-    "task": {"enum": ["generation", "hacking"]},
+    "task": {"enum": ["generation", "hacking", "fault_exposure"]},
     "raw_text": {"type": "string"},
     "final_message": {"type": "string"},
     "transcript": {"type": "array"},

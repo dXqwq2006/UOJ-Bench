@@ -256,7 +256,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
     if value.get("schema_version") != 1:
         raise BridgeContractError("request schema_version must be 1")
     task = value.get("task")
-    if task not in {"generation", "hacking"}:
+    if task not in {"generation", "hacking", "fault_exposure"}:
         raise BridgeContractError("request task is unsupported")
     if value.get("model") != MODEL or value.get("reasoning_effort") != REASONING_EFFORT:
         raise BridgeContractError("request changed the frozen model or reasoning effort")
@@ -267,6 +267,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
         "problem_id",
         "problem_statement",
         "language",
+        "submission_id",
         "submission_code",
         "submission_language",
         "chinese",
@@ -312,12 +313,32 @@ def _validate_request(value: Any) -> dict[str, Any]:
                 raise BridgeContractError(f"hacking input requires non-empty {name}")
         if len(task_input["submission_code"].encode("utf-8")) > MAX_REQUEST_BYTES:
             raise BridgeContractError("submission_code is too large")
+        if "submission_id" in task_input:
+            raise BridgeContractError("hacking input contains a fault-exposure-only field")
+    elif task == "fault_exposure":
+        for name in ("submission_id", "submission_code", "submission_language"):
+            item = task_input.get(name)
+            if name == "submission_id":
+                valid = isinstance(item, (str, int)) and not isinstance(item, bool)
+            else:
+                valid = isinstance(item, str) and bool(item.strip())
+            if not valid:
+                raise BridgeContractError(f"fault exposure input requires non-empty {name}")
+        if len(task_input["submission_code"].encode("utf-8")) > MAX_REQUEST_BYTES:
+            raise BridgeContractError("submission_code is too large")
+        if "language" in task_input or "chinese" in task_input:
+            raise BridgeContractError(
+                "fault exposure input contains a UOJ-only field"
+            )
     else:
         for name in ("language", "chinese"):
             if name not in task_input:
                 raise BridgeContractError(f"generation input requires {name}")
-        if "submission_code" in task_input or "submission_language" in task_input:
-            raise BridgeContractError("generation input contains a hacking-only field")
+        if any(
+            name in task_input
+            for name in ("submission_id", "submission_code", "submission_language")
+        ):
+            raise BridgeContractError("generation input contains a target-submission field")
     return json.loads(_canonical_bytes(dict(value)).decode("utf-8"))
 
 
@@ -457,7 +478,7 @@ def _materialize_surface(workspace: Path, request: Mapping[str, Any]) -> str:
     _write_json(surface / "task.json", request)
     statement = str(task_input["problem_statement"]).rstrip() + "\n"
     _write_bytes(surface / "statement.md", statement.encode("utf-8"))
-    if request["task"] == "hacking":
+    if request["task"] in {"hacking", "fault_exposure"}:
         wrong = str(task_input["submission_code"]).rstrip() + "\n"
         _write_bytes(surface / "wrong-source.txt", wrong.encode("utf-8"))
     return _tree_sha256(surface)[0]
@@ -692,7 +713,7 @@ def _candidate(workspace: Path, task: str, maximum: int) -> dict[str, str]:
     choices = [name for name in ("candidate.in", "generator.py") if name in files]
     if len(choices) != 1 or files != choices:
         raise BridgeContractError(
-            "hacking must export exactly one of output/candidate.in or output/generator.py"
+            f"{task} must export exactly one of output/candidate.in or output/generator.py"
         )
     selected = choices[0]
     content = _regular_candidate(output / selected, maximum, selected)
@@ -702,7 +723,7 @@ def _candidate(workspace: Path, task: str, maximum: int) -> dict[str, str]:
         except SyntaxError as exc:
             raise BridgeContractError("generator.py is not valid Python syntax") from exc
     return {
-        "kind": "hack",
+        "kind": "hack" if task == "hacking" else "test_case",
         "format": "raw_input" if selected == "candidate.in" else "python_generator",
         "content": content,
     }
@@ -745,6 +766,22 @@ def execute_request(request_value: Any) -> dict[str, Any]:
             "agent_command": agent_command_identity,
             "candidate_sha256": candidate_sha,
         }
+        signature_value = {
+            key: identity[key]
+            for key in (
+                "profile",
+                "model",
+                "reasoning_effort",
+                "skill_bundle_sha256",
+                "expected_skill_bundle_sha256",
+                "copied_skills_sha256",
+                "bridge_config_sha256",
+                "agent_command",
+            )
+        }
+        identity["pipeline_signature_sha256"] = _sha256_bytes(
+            _canonical_bytes(signature_value)
+        )
         receipt = {
             "schema_version": 1,
             "status": "completed",
