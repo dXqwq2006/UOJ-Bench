@@ -22,8 +22,9 @@ from scripts.run_hack_agent_batch import (
 
 
 SCHEMA_VERSION = 1
-TERMINAL = {"completed", "invalid_candidate"}
+TERMINAL = {"completed", "invalid_candidate", "unavailable_problem"}
 QUOTA_ERROR = "API usage limit exceeded"
+NOT_HACKABLE_ERROR = "This problem is not hackable"
 PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
 
 
@@ -155,7 +156,9 @@ def _summary(
         }
         selected = [record for sample_id, record in records.items() if sample_id in ids]
         completed = sum(record.get("status") == "completed" for record in selected)
-        failed = sum(record.get("status") == "invalid_candidate" for record in selected)
+        failed = sum(
+            record.get("status") in TERMINAL - {"completed"} for record in selected
+        )
         retryable = sum(record.get("status") == "retryable_error" for record in selected)
         successes = sum(
             record.get("status") == "completed" and record.get("score") == 1
@@ -266,13 +269,21 @@ def run_batch(
                 "provenance": "uoj_api",
             }
         except Exception as error:
-            reason = "quota" if QUOTA_ERROR in str(error) else "infrastructure"
+            message = str(error)
+            if NOT_HACKABLE_ERROR in message:
+                return {
+                    **base,
+                    "status": "unavailable_problem",
+                    "score": 0,
+                    "error": {"type": type(error).__name__, "message": message},
+                }
+            reason = "quota" if QUOTA_ERROR in message else "infrastructure"
             halt_reason[0] = reason
             halt.set()
             return {
                 **base,
                 "status": "retryable_error",
-                "error": {"type": type(error).__name__, "message": str(error)},
+                "error": {"type": type(error).__name__, "message": message},
             }
 
     pending_by_split = {

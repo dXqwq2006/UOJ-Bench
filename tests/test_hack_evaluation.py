@@ -152,6 +152,33 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(summary["overall"]["failed"], 1)
             self.assertEqual(summary["overall"]["pass_at_1"], 0.5)
 
+    def test_unhackable_problem_is_a_terminal_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset, rollout_dir = prepare(root)
+            with patch.object(evaluation, "_new_client", return_value=object()), patch.object(
+                evaluation,
+                "_judge_candidate",
+                side_effect=[
+                    RuntimeError(evaluation.NOT_HACKABLE_ERROR),
+                    {"result": {"score": 1}},
+                ],
+            ):
+                summary = evaluation.run_batch(
+                    dataset_dir=dataset,
+                    rollout_dir=rollout_dir,
+                    result_dir=root / "result",
+                    workers=1,
+                    resume=True,
+                    progress=False,
+                )
+
+            self.assertIsNone(summary["halt_reason"])
+            self.assertEqual(summary["overall"]["completed"], 1)
+            self.assertEqual(summary["overall"]["failed"], 1)
+            self.assertEqual(summary["overall"]["pending_evaluation"], 0)
+            self.assertEqual(summary["overall"]["pass_at_1"], 0.5)
+
 
 if __name__ == "__main__":
     unittest.main()
