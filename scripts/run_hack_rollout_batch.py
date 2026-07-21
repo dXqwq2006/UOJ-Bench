@@ -130,7 +130,7 @@ def _seed_record(sample: HackSample, source: Mapping[str, Any], source_dir: Path
         return None
     if not isinstance(usages, list) or not usages or not isinstance(usages[0], Mapping):
         return None
-    raw_text = transcript[1].get("content") if isinstance(transcript[1], Mapping) else None
+    raw_text = messages[1].get("content") if isinstance(messages[1], Mapping) else None
     if not isinstance(raw_text, str):
         return None
     match = PYTHON_BLOCK.search(raw_text)
@@ -143,7 +143,7 @@ def _seed_record(sample: HackSample, source: Mapping[str, Any], source_dir: Path
         "parse_error": None if match else "no output hack data",
         "raw_text": raw_text,
         "message": messages[1],
-        "transcript": transcript[:2],
+        "transcript": messages[:2],
         "usage": dict(usages[0]),
         "provenance": "imported_agent_result",
         "source_result_dir": str(source_dir),

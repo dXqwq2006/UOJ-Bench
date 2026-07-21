@@ -149,7 +149,8 @@ class RolloutTests(unittest.TestCase):
             "attempt": 3,
             "transcript": [
                 {"role": "user", "content": "prompt"},
-                {"role": "assistant", "content": "```python\nprint(7)\n```"},
+                {"role": "assistant", "content": "[REASONING] internal reasoning"},
+                {"role": "assistant", "content": "[ANSWER] rendered answer"},
                 {"role": "user", "content": "judge feedback"},
             ],
             "messages": [
