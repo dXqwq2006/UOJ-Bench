@@ -425,7 +425,36 @@ def _stage_agent_package(integration_root: Path, workspace: Path) -> Path:
         raise
 
 
-def _export_result(container_id: str, workspace: Path) -> dict[str, str]:
+def _install_returned_trees(
+    returned: Path, workspace: Path, names: Sequence[str]
+) -> dict[str, str]:
+    staged: list[tuple[Path, Path, str, str]] = []
+    installed: dict[str, str] = {}
+    try:
+        for name in names:
+            source = returned / name
+            digest = _regular_tree(source, f"returned {name}")
+            destination = workspace / name
+            if os.path.lexists(destination):
+                raise SchedulerError(f"private result destination already exists: {name}")
+            temporary = workspace / f".{name}-returned-{secrets.token_hex(6)}"
+            shutil.copytree(source, temporary, copy_function=shutil.copy2)
+            if _regular_tree(temporary, f"staged {name}") != digest:
+                raise SchedulerError(f"private result copy changed: {name}")
+            staged.append((temporary, destination, name, digest))
+
+        for temporary, destination, name, digest in staged:
+            os.replace(temporary, destination)
+            installed[f"{name}_sha256"] = digest
+        return installed
+    finally:
+        for temporary, _, _, _ in staged:
+            shutil.rmtree(temporary, ignore_errors=True)
+
+
+def _export_result(
+    container_id: str, workspace: Path, *, task: str
+) -> dict[str, str]:
     quarantine = Path(tempfile.mkdtemp(prefix=".icpc-returned-", dir=workspace.parent))
     returned = quarantine / "cell"
     try:
@@ -446,6 +475,12 @@ def _export_result(container_id: str, workspace: Path) -> dict[str, str]:
         if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
             raise SchedulerError("returned agent result is unsafe")
 
+        private_hashes = (
+            _install_returned_trees(returned, workspace, ("audit", "package"))
+            if task == "test_package"
+            else {}
+        )
+
         host_output = workspace / "output"
         staged_output = workspace / f".output-returned-{secrets.token_hex(6)}"
         shutil.copytree(returned / "output", staged_output, copy_function=shutil.copy2)
@@ -465,6 +500,7 @@ def _export_result(container_id: str, workspace: Path) -> dict[str, str]:
         return {
             "output_sha256": output_sha,
             "agent_result_sha256": _sha256_file(workspace / "control" / "agent-result.json"),
+            **private_hashes,
         }
     finally:
         shutil.rmtree(quarantine, ignore_errors=True)
@@ -620,7 +656,7 @@ def run(
                 "agent container exited nonzero"
                 + (f": {diagnostic}" if diagnostic else "")
             )
-        exported = _export_result(container_id, workspace)
+        exported = _export_result(container_id, workspace, task=task)
         return {
             "schema_version": 1,
             "status": "completed",

@@ -52,6 +52,7 @@ from uoj_skill_bridge.zero_mount_scheduler import (
     SchedulerError,
     _attest_integration,
     _container_create_argv,
+    _install_returned_trees,
     _job_subnet,
 )
 
@@ -655,6 +656,86 @@ class BridgeRuntimeTests(unittest.TestCase):
         self.assertEqual(_job_subnet("0" * 19 + "1"), "10.240.0.8/29")
         with self.assertRaisesRegex(SchedulerError, "suffix"):
             _job_subnet("not-hex")
+
+    def test_private_package_trees_are_installed_and_hashed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            returned = root / "returned"
+            workspace = root / "workspace"
+            (returned / "audit").mkdir(parents=True)
+            (returned / "package" / "tests").mkdir(parents=True)
+            workspace.mkdir()
+            (returned / "audit" / "readiness.md").write_text(
+                "verdict: go\n", encoding="utf-8"
+            )
+            (returned / "package" / "tests" / "001.in").write_text(
+                "1\n", encoding="utf-8"
+            )
+
+            hashes = _install_returned_trees(
+                returned, workspace, ("audit", "package")
+            )
+
+            self.assertEqual(
+                hashes["audit_sha256"], _tree_sha256(workspace / "audit")[0]
+            )
+            self.assertEqual(
+                hashes["package_sha256"], _tree_sha256(workspace / "package")[0]
+            )
+            self.assertEqual(
+                (workspace / "audit" / "readiness.md").read_text(encoding="utf-8"),
+                "verdict: go\n",
+            )
+
+    def test_private_package_tree_install_refuses_existing_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            returned = root / "returned"
+            workspace = root / "workspace"
+            (returned / "audit").mkdir(parents=True)
+            (returned / "package").mkdir()
+            (returned / "audit" / "file").write_text("audit", encoding="utf-8")
+            (returned / "package" / "file").write_text("package", encoding="utf-8")
+            (workspace / "audit").mkdir(parents=True)
+
+            with self.assertRaisesRegex(SchedulerError, "already exists: audit"):
+                _install_returned_trees(returned, workspace, ("audit", "package"))
+            self.assertFalse((workspace / "package").exists())
+
+    def test_private_package_tree_install_rejects_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            returned = root / "returned"
+            workspace = root / "workspace"
+            (returned / "audit").mkdir(parents=True)
+            (returned / "package").mkdir()
+            workspace.mkdir()
+            (returned / "audit" / "target").write_text("x", encoding="utf-8")
+            (returned / "audit" / "link").symlink_to("target")
+            (returned / "package" / "file").write_text("x", encoding="utf-8")
+
+            with self.assertRaisesRegex(SchedulerError, "not a safe regular tree"):
+                _install_returned_trees(returned, workspace, ("audit", "package"))
+            self.assertFalse((workspace / "audit").exists())
+            self.assertFalse((workspace / "package").exists())
+
+    def test_private_package_tree_install_rejects_hardlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            returned = root / "returned"
+            workspace = root / "workspace"
+            (returned / "audit").mkdir(parents=True)
+            (returned / "package").mkdir()
+            workspace.mkdir()
+            source = returned / "audit" / "source"
+            source.write_text("x", encoding="utf-8")
+            os.link(source, returned / "audit" / "link")
+            (returned / "package" / "file").write_text("x", encoding="utf-8")
+
+            with self.assertRaisesRegex(SchedulerError, "not a safe regular tree"):
+                _install_returned_trees(returned, workspace, ("audit", "package"))
+            self.assertFalse((workspace / "audit").exists())
+            self.assertFalse((workspace / "package").exists())
 
     def test_zero_mount_scheduler_binds_complete_integration_manifest(self) -> None:
         integration = ROOT / "integrations" / "icpc_light_v33"
