@@ -717,7 +717,8 @@ def _batch_results(base_url: str, payload: Mapping[str, Any]) -> dict[str, Mappi
         response = _request_json(base_url, "/custom-test/batch", payload)
     except RuntimeError as exc:
         tests = payload.get("tests")
-        if "LightCP HTTP 413:" not in str(exc) or not isinstance(tests, list) or len(tests) < 2:
+        oversized = "LightCP HTTP 413:" in str(exc) or "Invalid string length" in str(exc)
+        if not oversized or not isinstance(tests, list) or len(tests) < 2:
             raise
         middle = len(tests) // 2
         results = {}
