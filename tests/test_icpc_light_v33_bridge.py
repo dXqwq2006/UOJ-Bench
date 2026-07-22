@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import runpy
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -53,6 +54,7 @@ from uoj_skill_bridge.zero_mount_scheduler import (
     _attest_integration,
     _container_create_argv,
     _ephemeral_directory,
+    _export_failure_diagnostics,
     _install_returned_trees,
     _job_subnet,
 )
@@ -669,6 +671,47 @@ class BridgeRuntimeTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
         mkdtemp.assert_called_once_with(prefix=".icpc-returned-")
+
+    def test_failed_agent_retains_only_bounded_regular_control_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            workspace = root / "workspace"
+            (workspace / "control").mkdir(parents=True)
+            quarantine = root / "quarantine"
+
+            def copy_control(arguments, **_kwargs):
+                returned = Path(arguments[-1])
+                returned.mkdir(parents=True)
+                (returned / "codex-events.jsonl").write_text(
+                    '{"type":"error"}\n', encoding="utf-8"
+                )
+                (returned / "codex-stderr.log").write_text(
+                    "agent failed\n", encoding="utf-8"
+                )
+                (returned / "agent-result.json").symlink_to("codex-stderr.log")
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+
+            with patch(
+                "uoj_skill_bridge.zero_mount_scheduler._ephemeral_directory",
+                return_value=quarantine,
+            ), patch(
+                "uoj_skill_bridge.zero_mount_scheduler._docker",
+                side_effect=copy_control,
+            ):
+                retained = _export_failure_diagnostics("a" * 64, workspace)
+
+            self.assertEqual(
+                set(retained),
+                {"failed-codex-events.jsonl", "failed-codex-stderr.log"},
+            )
+            self.assertEqual(
+                (workspace / "control" / "failed-codex-stderr.log").read_text(),
+                "agent failed\n",
+            )
+            self.assertFalse(
+                (workspace / "control" / "failed-agent-result.json").exists()
+            )
+            self.assertFalse(quarantine.exists())
 
     def test_private_package_trees_are_installed_and_hashed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

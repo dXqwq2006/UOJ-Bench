@@ -509,6 +509,52 @@ def _export_result(
         shutil.rmtree(quarantine, ignore_errors=True)
 
 
+def _export_failure_diagnostics(
+    container_id: str, workspace: Path
+) -> dict[str, str]:
+    quarantine = _ephemeral_directory(".icpc-failed-control-")
+    returned = quarantine / "control"
+    retained: dict[str, str] = {}
+    try:
+        copied = _docker(
+            ["cp", f"{container_id}:/work/cell/control", str(returned)],
+            timeout=120,
+            check=False,
+        )
+        if copied.returncode != 0:
+            return retained
+        for name in ("agent-result.json", "codex-events.jsonl", "codex-stderr.log"):
+            source = returned / name
+            if not os.path.lexists(source):
+                continue
+            metadata = source.lstat()
+            if (
+                source.is_symlink()
+                or not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+                or metadata.st_size > MAX_DOCKER_OUTPUT_BYTES
+            ):
+                continue
+            destination = workspace / "control" / f"failed-{name}"
+            if os.path.lexists(destination):
+                continue
+            temporary = destination.with_name(
+                f".{destination.name}.{secrets.token_hex(6)}.tmp"
+            )
+            try:
+                shutil.copyfile(source, temporary, follow_symlinks=False)
+                os.replace(temporary, destination)
+            finally:
+                if os.path.lexists(temporary):
+                    os.unlink(temporary)
+            retained[destination.name] = _sha256_file(destination)
+        return retained
+    except (OSError, SchedulerError, subprocess.SubprocessError):
+        return retained
+    finally:
+        shutil.rmtree(quarantine, ignore_errors=True)
+
+
 def run(
     *,
     task: str,
@@ -652,12 +698,19 @@ def run(
         )
         state = terminal["State"]
         if returncode != 0 or state.get("ExitCode") != 0:
+            retained = _export_failure_diagnostics(container_id, workspace)
             diagnostic = (attached_stderr or attached_stdout)[-2000:].decode(
                 "utf-8", errors="replace"
+            )
+            retained_note = (
+                "; retained diagnostics: " + ", ".join(sorted(retained))
+                if retained
+                else ""
             )
             raise SchedulerError(
                 "agent container exited nonzero"
                 + (f": {diagnostic}" if diagnostic else "")
+                + retained_note
             )
         exported = _export_result(container_id, workspace, task=task)
         return {
