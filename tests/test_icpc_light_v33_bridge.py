@@ -52,6 +52,7 @@ from uoj_skill_bridge.zero_mount_scheduler import (
     SchedulerError,
     _attest_integration,
     _container_create_argv,
+    _ephemeral_directory,
     _install_returned_trees,
     _job_subnet,
 )
@@ -656,6 +657,18 @@ class BridgeRuntimeTests(unittest.TestCase):
         self.assertEqual(_job_subnet("0" * 19 + "1"), "10.240.0.8/29")
         with self.assertRaisesRegex(SchedulerError, "suffix"):
             _job_subnet("not-hex")
+
+    def test_scheduler_ephemeral_trees_do_not_use_workspace_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            expected = Path(temporary) / ".icpc-returned-test"
+            with patch(
+                "uoj_skill_bridge.zero_mount_scheduler.tempfile.mkdtemp",
+                return_value=str(expected),
+            ) as mkdtemp:
+                actual = _ephemeral_directory(".icpc-returned-")
+
+        self.assertEqual(actual, expected)
+        mkdtemp.assert_called_once_with(prefix=".icpc-returned-")
 
     def test_private_package_trees_are_installed_and_hashed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

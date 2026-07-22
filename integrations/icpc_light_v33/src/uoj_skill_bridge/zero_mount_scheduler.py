@@ -398,11 +398,14 @@ def _attest_integration(expected_manifest_sha256: str) -> tuple[Path, str]:
     return root, actual_manifest_sha256
 
 
+def _ephemeral_directory(prefix: str) -> Path:
+    # ntfs3 can strand recursive deletion; use the host temporary filesystem.
+    return Path(tempfile.mkdtemp(prefix=prefix))
+
+
 def _stage_agent_package(integration_root: Path, workspace: Path) -> Path:
     source = integration_root / "src" / "uoj_skill_bridge"
-    staging_parent = Path(
-        tempfile.mkdtemp(prefix=".icpc-agent-package-", dir=workspace.parent)
-    )
+    staging_parent = _ephemeral_directory(".icpc-agent-package-")
     try:
         package = staging_parent / "uoj_skill_bridge"
         package.mkdir(mode=0o700)
@@ -455,7 +458,7 @@ def _install_returned_trees(
 def _export_result(
     container_id: str, workspace: Path, *, task: str
 ) -> dict[str, str]:
-    quarantine = Path(tempfile.mkdtemp(prefix=".icpc-returned-", dir=workspace.parent))
+    quarantine = _ephemeral_directory(".icpc-returned-")
     returned = quarantine / "cell"
     try:
         _docker(["cp", f"{container_id}:/work/cell", str(returned)], timeout=120)
