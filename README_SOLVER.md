@@ -356,10 +356,12 @@ inputs without answer files, and delegates all validation and scoring to the
 hidden TCE or CodeContests+ jury. The two prompt changes and hidden-jury
 replacement are recorded in `test_package_contract.deltas`.
 
-The complete variable-size suite is published as one ordered package with a
-hard limit of 50 inputs. There is no category round-robin projection and no
-padding with `ERROR` rows. If generation produces more than 50 inputs, the
-whole package is marked `over_limit` and contributes no scoreable test.
+The materializer reserves one global 50-input budget before executing generated
+code: 10 direct LLM inputs, 20 RPGen/SPGen inputs shared across its declared
+functions, and 20 HackGen inputs shared across its declared functions. Every
+accepted input requested by that execution plan is published in source order;
+there is no post-hoc truncation, category projection, or `ERROR` padding. The
+shared package contract still rejects an impossible overflow defensively.
 
 Generated Python runs through the existing LightCP profiles because the H100
 host cannot run upstream's `bwrap` setup. Raw model calls, kits, suites, package

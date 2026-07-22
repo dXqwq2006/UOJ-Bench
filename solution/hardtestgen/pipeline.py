@@ -22,7 +22,10 @@ from .api import (
 )
 
 
-MAX_FINAL_TESTS = 50
+LLM_INPUT_BUDGET = 10
+REGULAR_INPUT_BUDGET = 20
+HACK_INPUT_BUDGET = 20
+MAX_FINAL_TESTS = LLM_INPUT_BUDGET + REGULAR_INPUT_BUDGET + HACK_INPUT_BUDGET
 CallDetails = Callable[[Any, str], tuple[str, Mapping[str, Any], Mapping[str, Any]]]
 _JSON_FENCE = re.compile(r"```json\s*(.*?)```", re.DOTALL)
 
@@ -101,6 +104,13 @@ def _optional_code(value: Any) -> str | None:
 
 def _stable_unique(values: Sequence[str]) -> list[str]:
     return list(dict.fromkeys(values))
+
+
+def _budget_targets(function_count: int, budget: int) -> tuple[int, ...]:
+    if function_count <= 0:
+        return ()
+    base, remainder = divmod(budget, function_count)
+    return tuple(base + int(index < remainder) for index in range(function_count))
 
 
 class HardTestGenPipeline:
@@ -215,36 +225,42 @@ class HardTestGenPipeline:
     ) -> list[GeneratedInput]:
         started = time.monotonic()
         llm_inputs = self._validate_inputs(
-            list(kit.llm_inputs), kit.input_validator, executor, 10_000
+            list(kit.llm_inputs)[:LLM_INPUT_BUDGET],
+            kit.input_validator,
+            executor,
+            10_000,
         )
         generated = [GeneratedInput(value, "LLMGen") for value in llm_inputs]
 
-        is_multi_category = len(kit.regular_functions) >= 2
-        regular_target = 10 if is_multi_category else 20
-        regular_attempts = 20 if is_multi_category else 40
-        for name in kit.regular_functions:
-            if time.monotonic() - started > 180:
+        regular_targets = _budget_targets(
+            len(kit.regular_functions), REGULAR_INPUT_BUDGET
+        )
+        for name, target in zip(kit.regular_functions, regular_targets):
+            if target == 0 or time.monotonic() - started > 180:
                 break
             values = self._run_generator(
                 kit.regular_generator,
                 name,
                 kit.input_validator,
                 executor,
-                regular_attempts,
-                regular_target,
+                target * 2,
+                target,
             )
-            generated.extend(GeneratedInput(value, "RPGen_SPGen", name) for value in values)
+            generated.extend(
+                GeneratedInput(value, "RPGen_SPGen", name) for value in values
+            )
 
-        for name in kit.hack_functions:
-            if time.monotonic() - started > 180:
+        hack_targets = _budget_targets(len(kit.hack_functions), HACK_INPUT_BUDGET)
+        for name, target in zip(kit.hack_functions, hack_targets):
+            if target == 0 or time.monotonic() - started > 180:
                 break
             values = self._run_generator(
                 kit.hack_generator,
                 name,
                 kit.input_validator,
                 executor,
-                20,
-                10,
+                target * 2,
+                target,
             )
             generated.extend(GeneratedInput(value, "HackGen", name) for value in values)
         return generated

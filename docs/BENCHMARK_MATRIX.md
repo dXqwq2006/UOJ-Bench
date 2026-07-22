@@ -80,7 +80,7 @@ TestCase-Eval 的 accepted submissions 用于 oracle 共识，不计作要杀死
 - 出处：HardTestGen 固定 commit `03553153` 的两阶段 prompt、validator 和三类输入生成器。
 - 原论文依赖参考程序产生/核对输出；统一整包实验明确改为 statement-only adapter，参考程序、错误程序和数据集 validator/checker 均留在隐藏 jury。
 - 保留两个顺序 LLM stage（IV/OJF、input generation）和 LLMGen、RPGen/SPGen、HackGen 的原始生成流程；不再投影为 20 个 category round-robin 槽位。
-- 一次 pipeline 返回完整有序输入包；最终包上限 50，超过上限整包失败而不是截断。
+- 一次 pipeline 返回完整有序输入包；materializer 在执行前分配 `10 LLM + 20 RP/SP + 20 Hack` 的全局预算，所有实际生成项均按声明顺序发布，防御性检查仍拒绝不可能的超限包。
 - 生产入口为 `scripts.test_paper_hardtestgen`，并逐 stage checkpoint，CPU materialization 与 LLM rollout 可分离恢复。
 
 ### `icpc_light_v33_bridge`

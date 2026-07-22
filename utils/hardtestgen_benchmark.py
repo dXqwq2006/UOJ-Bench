@@ -17,7 +17,12 @@ from solution.hardtestgen.api import (
     TestCase,
     TestCaseKit,
 )
-from solution.hardtestgen.pipeline import HardTestGenPipeline
+from solution.hardtestgen.pipeline import (
+    HACK_INPUT_BUDGET,
+    LLM_INPUT_BUDGET,
+    REGULAR_INPUT_BUDGET,
+    HardTestGenPipeline,
+)
 from utils.test_package_benchmark import (
     MAX_PACKAGE_TESTS,
     bind_package_contract,
@@ -204,6 +209,7 @@ def generate_kits(
             "reference program removed from both paper prompts",
             "hidden benchmark jury replaces paper oracle consensus",
             "full ordered suite replaces 20-test category projection",
+            "global 10/20/20 materialization budget enforces the 50-input cap",
         ),
     )
     store.bind_manifest(
@@ -217,7 +223,12 @@ def generate_kits(
                 "competitor_input": "statement_only",
                 "suite_projection": None,
                 "max_final_tests": MAX_PACKAGE_TESTS,
-                "overflow": "reject_package",
+                "materialization_budget": {
+                    "LLMGen": LLM_INPUT_BUDGET,
+                    "RPGen_SPGen": REGULAR_INPUT_BUDGET,
+                    "HackGen": HACK_INPUT_BUDGET,
+                },
+                "overflow": "defensive_reject",
                 "stable_deduplication": True,
             },
             "model_request": effective_model_request(),

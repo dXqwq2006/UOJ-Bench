@@ -1,3 +1,4 @@
+from collections import Counter
 import json
 import tempfile
 import unittest
@@ -14,6 +15,10 @@ from solution.hardtestgen.api import (
 )
 from solution.hardtestgen.lightcp import HardTestGenLightCP
 from solution.hardtestgen.pipeline import (
+    HACK_INPUT_BUDGET,
+    LLM_INPUT_BUDGET,
+    MAX_FINAL_TESTS,
+    REGULAR_INPUT_BUDGET,
     HardTestGenPipeline,
     function_names,
     parse_kit_response,
@@ -60,6 +65,23 @@ class FakeExecutor:
         if "value = gen_hacking_input_edge()" in source:
             return [ExecutionResult("exited", "Result: 3") for _ in inputs]
         raise AssertionError(f"unexpected execution: {language} {source[:80]}")
+
+
+class BudgetExecutor:
+    def run_many(self, language, source, inputs, *, time_limit_ms, memory_limit_mb):
+        if "values = json.loads" in source:
+            values = json.loads(inputs[0])
+            return [ExecutionResult("exited", "Result: " + json.dumps(values))]
+        call = next(
+            line.strip()
+            for line in source.splitlines()
+            if line.strip().startswith("value = gen_")
+        )
+        function_name = call.removeprefix("value = ").removesuffix("()")
+        return [
+            ExecutionResult("exited", f"Result: {function_name}:{index}")
+            for index, _value in enumerate(inputs)
+        ]
 
 
 class FakePipeline:
@@ -177,16 +199,64 @@ class HardTestGenTests(unittest.TestCase):
         self.assertEqual(result.test_cases, ())
         self.assertEqual(result.generated_inputs, ())
 
-    def test_suite_over_50_rejects_whole_package(self):
+    def test_llm_inputs_are_bounded_before_publication(self):
         values = tuple(str(index) for index in range(51))
         result = HardTestGenPipeline("unused").generate_suite(
             HardTestGenInput("p", "statement"),
             TestCaseKit(VALIDATOR, None, values, None, (), None, (), {}, {}, {}, {}),
-            FakeExecutor(),
+            BudgetExecutor(),
         )
-        self.assertEqual(result.status, "test_count_limit_exceeded")
-        self.assertEqual(result.test_cases, ())
-        self.assertEqual(len(result.generated_inputs), 51)
+        self.assertEqual(result.status, "complete")
+        self.assertEqual(
+            [case.input for case in result.test_cases],
+            list(values[:LLM_INPUT_BUDGET]),
+        )
+
+    def test_generator_targets_share_one_global_50_input_budget(self):
+        regular_functions = tuple(
+            f"gen_range_based_input_{index}" for index in range(3)
+        )
+        hack_functions = tuple(
+            f"gen_hacking_input_{index}" for index in range(6)
+        )
+        regular_source = "\n".join(
+            f"def {name}(): return 'unused'" for name in regular_functions
+        )
+        hack_source = "\n".join(
+            f"def {name}(): return 'unused'" for name in hack_functions
+        )
+        result = HardTestGenPipeline("unused").generate_suite(
+            HardTestGenInput("p", "statement"),
+            TestCaseKit(
+                VALIDATOR,
+                None,
+                tuple(str(index) for index in range(15)),
+                regular_source,
+                regular_functions,
+                hack_source,
+                hack_functions,
+                {},
+                {},
+                {},
+                {},
+            ),
+            BudgetExecutor(),
+        )
+
+        self.assertEqual(result.status, "complete")
+        self.assertEqual(len(result.test_cases), MAX_FINAL_TESTS)
+        methods = Counter(case.method for case in result.test_cases)
+        self.assertEqual(methods["LLMGen"], LLM_INPUT_BUDGET)
+        self.assertEqual(methods["RPGen_SPGen"], REGULAR_INPUT_BUDGET)
+        self.assertEqual(methods["HackGen"], HACK_INPUT_BUDGET)
+        regular_counts = Counter(
+            case.generator for case in result.test_cases if case.method == "RPGen_SPGen"
+        )
+        hack_counts = Counter(
+            case.generator for case in result.test_cases if case.method == "HackGen"
+        )
+        self.assertEqual(list(regular_counts.values()), [7, 7, 6])
+        self.assertEqual(list(hack_counts.values()), [4, 4, 3, 3, 3, 3])
 
     def _prepared_store(self, database):
         store = RunStore(database)
@@ -230,9 +300,15 @@ class HardTestGenTests(unittest.TestCase):
                 package = store.connection.execute(
                     "SELECT status, declared_test_count FROM package_runs"
                 ).fetchone()
+                manifest = store.manifest()["hardtestgen"]
 
         self.assertEqual([row["candidate"] for row in rows], ["1", "2", "4", "3"])
         self.assertEqual(tuple(package), ("complete", 4))
+        self.assertEqual(
+            manifest["materialization_budget"],
+            {"LLMGen": 10, "RPGen_SPGen": 20, "HackGen": 20},
+        )
+        self.assertEqual(manifest["overflow"], "defensive_reject")
         self.assertNotIn("PRIVATE ORACLE", calls)
 
     def test_suite_checkpoint_republishes_a_missing_package(self):
