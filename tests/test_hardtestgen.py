@@ -165,6 +165,18 @@ class HardTestGenTests(unittest.TestCase):
             ],
         )
 
+    def test_suite_discards_empty_inputs_before_publication(self):
+        result = HardTestGenPipeline("unused").generate_suite(
+            HardTestGenInput("p", "statement"),
+            TestCaseKit(
+                VALIDATOR, None, ("",), None, (), None, (), {}, {}, {}, {}
+            ),
+            FakeExecutor(),
+        )
+        self.assertEqual(result.status, "input_generation_failed")
+        self.assertEqual(result.test_cases, ())
+        self.assertEqual(result.generated_inputs, ())
+
     def test_suite_over_50_rejects_whole_package(self):
         values = tuple(str(index) for index in range(51))
         result = HardTestGenPipeline("unused").generate_suite(
@@ -222,6 +234,34 @@ class HardTestGenTests(unittest.TestCase):
         self.assertEqual([row["candidate"] for row in rows], ["1", "2", "4", "3"])
         self.assertEqual(tuple(package), ("complete", 4))
         self.assertNotIn("PRIVATE ORACLE", calls)
+
+    def test_suite_checkpoint_republishes_a_missing_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._prepared_store(Path(directory) / "results.sqlite3") as store:
+                generate_kits(
+                    store, model="m", workers=1, pipeline_factory=FakePipeline
+                )
+                generate_suites(store, executor=FakeExecutor(), workers=1)
+                store.connection.execute("DELETE FROM generations")
+                store.connection.execute("DELETE FROM package_tests")
+                store.connection.execute("DELETE FROM package_runs")
+                store.connection.commit()
+
+                result = generate_suites(
+                    store,
+                    executor=FakeExecutor(),
+                    workers=1,
+                )
+                package = store.connection.execute(
+                    "SELECT status, declared_test_count FROM package_runs"
+                ).fetchone()
+                generated = store.connection.execute(
+                    "SELECT count(*) FROM generations"
+                ).fetchone()[0]
+
+        self.assertEqual(result["scheduled"], 1)
+        self.assertEqual(tuple(package), ("complete", 4))
+        self.assertEqual(generated, 4)
 
     def test_retry_resumes_only_the_failed_second_llm_stage(self):
         FlakySecondStagePipeline.first_calls = 0

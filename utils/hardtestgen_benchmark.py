@@ -9,7 +9,14 @@ import json
 import time
 
 from solution.hardtestgen import UPSTREAM_COMMIT
-from solution.hardtestgen.api import HardTestGenInput, KitStage, SuiteResult, TestCaseKit
+from solution.hardtestgen.api import (
+    GeneratedInput,
+    HardTestGenInput,
+    KitStage,
+    SuiteResult,
+    TestCase,
+    TestCaseKit,
+)
 from solution.hardtestgen.pipeline import HardTestGenPipeline
 from utils.test_package_benchmark import (
     MAX_PACKAGE_TESTS,
@@ -108,6 +115,16 @@ def _stage_from_json(value: str) -> KitStage:
         data["message"],
         data["usage"],
         data["parsed"],
+    )
+
+
+def _suite_from_json(value: str) -> SuiteResult:
+    data = json.loads(value)
+    return SuiteResult(
+        data["status"],
+        tuple(TestCase(**item) for item in data.get("test_cases", ())),
+        tuple(GeneratedInput(**item) for item in data.get("generated_inputs", ())),
+        data.get("error", ""),
     )
 
 
@@ -339,6 +356,7 @@ def _publish_suite(
                 "source_path": test_case.generator,
             }
             for test_case in result.test_cases
+            if test_case.input
         ),
         fidelity=FIDELITY,
         status=status,
@@ -374,10 +392,19 @@ def generate_suites(
     ):
         task = tasks[row["problem_id"]]
         existing = store.connection.execute(
-            "SELECT status FROM hardtestgen_suites WHERE problem_id = ?",
+            "SELECT status, suite_json FROM hardtestgen_suites WHERE problem_id = ?",
             (task.problem_id,),
         ).fetchone()
-        if existing is not None and not (retry_errors and existing["status"] != "complete"):
+        package = store.connection.execute(
+            "SELECT 1 FROM package_runs WHERE policy = ? AND problem_id = ?",
+            (POLICY, task.problem_id),
+        ).fetchone()
+        if existing is not None and package is None:
+            pending.append((task, None, _suite_from_json(existing["suite_json"])))
+            continue
+        if existing is not None and not (
+            retry_errors and existing["status"] != "complete"
+        ):
             continue
         if row["status"] != "complete":
             result = SuiteResult("kit_" + row["status"], error=row["error"])

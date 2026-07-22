@@ -288,7 +288,9 @@ print("Result: " + json.dumps(accepted), end="")
             return []
         if not isinstance(values, list):
             return []
-        return _stable_unique([value for value in values if isinstance(value, str)])
+        return _stable_unique(
+            [value for value in values if isinstance(value, str) and value]
+        )
 
     @staticmethod
     def _run_generator(
@@ -326,7 +328,7 @@ else:
             for result in results
             if result.succeeded and result.stdout.startswith("Result: ")
         ]
-        return _stable_unique(values)[:target]
+        return _stable_unique([value for value in values if value])[:target]
 
 
 
