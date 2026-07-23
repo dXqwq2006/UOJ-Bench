@@ -33,6 +33,7 @@ from scripts.run_hack_agent_batch import (
 
 
 PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
+MAX_ATTEMPTS = 3
 
 
 def _request_identity() -> dict[str, str | None]:
@@ -77,7 +78,7 @@ def _read_records(samples_dir: Path, known_ids: set[str]) -> dict[str, dict[str,
         sample_id = record.get("sample", {}).get("sample_id")
         if sample_id not in known_ids or path.stem != sample_id:
             raise ValueError(f"unexpected rollout result {path}")
-        if record.get("status") not in {"completed", "retryable_error"}:
+        if record.get("status") not in {"completed", "retryable_error", "api_failed"}:
             raise ValueError(f"invalid status in {path}")
         records[sample_id] = record
     return records
@@ -94,6 +95,7 @@ def _summary(samples: list[HackSample], records: Mapping[str, Mapping[str, Any]]
         return {
             "planned": len(items),
             "completed": sum(record.get("status") == "completed" for record in done),
+            "failed": sum(record.get("status") == "api_failed" for record in done),
             "valid_candidate": sum(
                 record.get("status") == "completed" and bool(record.get("candidate"))
                 for record in done
@@ -214,6 +216,14 @@ def run_batch(
     _prepare_run(result_path, identity, resume)
     samples_dir = result_path / "samples"
     records = _read_records(samples_dir, {sample.sample_id for sample in samples})
+    for sample_id, record in records.items():
+        if (
+            record.get("status") == "retryable_error"
+            and int(record.get("attempt", 0)) >= MAX_ATTEMPTS
+        ):
+            record = {**record, "status": "api_failed", "score": 0}
+            _atomic_json(samples_dir / f"{sample_id}.json", record)
+            records[sample_id] = record
 
     if seed_agent_result_dir:
         seeded = _seed_from_agent_results(
@@ -265,10 +275,11 @@ def run_batch(
         except Exception as error:
             record = {
                 "schema_version": SCHEMA_VERSION,
-                "status": "retryable_error",
+                "status": "api_failed" if attempt >= MAX_ATTEMPTS else "retryable_error",
                 "attempt": attempt,
                 "sample": sample.public_record(),
                 "round": 1,
+                "score": 0 if attempt >= MAX_ATTEMPTS else None,
                 "error": {"type": type(error).__name__, "message": str(error), "at": _now()},
                 "created_at": started_at,
                 "finished_at": _now(),
@@ -292,8 +303,7 @@ def run_batch(
                     record = future.result()
                     records[sample.sample_id] = record
                     if progress:
-                        detail = "completed" if record["status"] == "completed" else "retryable_error"
-                        print(f"[{sample.sample_id}] {detail}", flush=True)
+                        print(f"[{sample.sample_id}] {record['status']}", flush=True)
                 _atomic_json(result_path / "summary.json", _summary(samples, records))
 
     summary = _summary(samples, records)

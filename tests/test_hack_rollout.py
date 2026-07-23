@@ -80,6 +80,17 @@ class FakeSolver:
         return FakeSession()
 
 
+class FailingSolver:
+    capabilities = SolverCapabilities()
+
+    def __init__(self, calls):
+        self.calls = calls
+
+    def start_hacking(self, task):
+        self.calls.append(task.problem_id)
+        raise RuntimeError("temporary outage")
+
+
 class RolloutTests(unittest.TestCase):
     def test_first_turn_is_durable_and_resume_skips_completed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -166,6 +177,37 @@ class RolloutTests(unittest.TestCase):
         self.assertEqual(len(record["transcript"]), 2)
         self.assertEqual(record["usage"]["total_tokens"], 7)
         self.assertEqual(record["provenance"], "imported_agent_result")
+
+    def test_api_error_becomes_terminal_after_three_attempts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset = root / "dataset"
+            dataset.mkdir()
+            write_dataset(dataset)
+            result = root / "result"
+            calls = []
+
+            with patch.object(
+                rollout, "load_solver", side_effect=lambda *_: FailingSolver(calls)
+            ):
+                for attempt in range(1, 5):
+                    summary = rollout.run_batch(
+                        dataset_dir=dataset,
+                        result_dir=result,
+                        split="easy",
+                        solver_name="prompt",
+                        model="test-model",
+                        workers=1,
+                        resume=attempt > 1,
+                        progress=False,
+                    )
+
+            record = json.loads((result / "samples" / "easy-0000.json").read_text())
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(record["attempt"], 3)
+            self.assertEqual(record["status"], "api_failed")
+            self.assertEqual(summary["overall"]["failed"], 1)
+            self.assertEqual(summary["overall"]["retryable_error"], 0)
 
 
 if __name__ == "__main__":

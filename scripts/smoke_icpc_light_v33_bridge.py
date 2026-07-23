@@ -530,6 +530,7 @@ def run_smoke(
         if summary["overall"] != {
             "planned": 2,
             "completed": 2,
+            "failed": 0,
             "valid_candidate": 2,
             "retryable_error": 0,
         }:

@@ -152,7 +152,7 @@ class EvaluationTests(unittest.TestCase):
             self.assertEqual(summary["overall"]["failed"], 1)
             self.assertEqual(summary["overall"]["pass_at_1"], 0.5)
 
-    def test_unhackable_problem_is_a_terminal_failure(self):
+    def test_unhackable_problem_is_excluded(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             dataset, rollout_dir = prepare(root)
@@ -175,8 +175,42 @@ class EvaluationTests(unittest.TestCase):
 
             self.assertIsNone(summary["halt_reason"])
             self.assertEqual(summary["overall"]["completed"], 1)
-            self.assertEqual(summary["overall"]["failed"], 1)
+            self.assertEqual(summary["overall"]["failed"], 0)
+            self.assertEqual(summary["overall"]["excluded"], 1)
+            self.assertEqual(summary["overall"]["planned"], 1)
             self.assertEqual(summary["overall"]["pending_evaluation"], 0)
+            self.assertEqual(summary["overall"]["pass_at_1"], 1.0)
+
+    def test_exhausted_rollout_api_error_counts_as_failure(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dataset, rollout_dir = prepare(root)
+            path = rollout_dir / "samples" / "hard-0000.json"
+            record = json.loads(path.read_text())
+            record.update({"status": "api_failed", "candidate": None, "score": 0})
+            path.write_text(json.dumps(record))
+            calls = []
+
+            def judge(_client, sample, _candidate):
+                calls.append(sample.sample_id)
+                return {"result": {"score": 1}}
+
+            with patch.object(evaluation, "_new_client", return_value=object()), patch.object(
+                evaluation, "_judge_candidate", side_effect=judge
+            ):
+                summary = evaluation.run_batch(
+                    dataset_dir=dataset,
+                    rollout_dir=rollout_dir,
+                    result_dir=root / "result",
+                    workers=1,
+                    resume=True,
+                    progress=False,
+                )
+
+            self.assertEqual(calls, ["easy-0000"])
+            self.assertEqual(summary["overall"]["completed"], 1)
+            self.assertEqual(summary["overall"]["failed"], 1)
+            self.assertEqual(summary["overall"]["denominator"], 2)
             self.assertEqual(summary["overall"]["pass_at_1"], 0.5)
 
 

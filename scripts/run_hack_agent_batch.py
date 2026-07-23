@@ -406,7 +406,9 @@ def _pending_stages(
     pending = {
         split: [
             sample for sample in samples
-            if sample.split == split and records.get(sample.sample_id, {}).get("status") != "completed"
+            if sample.split == split
+            and records.get(sample.sample_id, {}).get("status")
+            not in {"completed", "api_failed"}
         ]
         for split in ("easy", "hard")
     }

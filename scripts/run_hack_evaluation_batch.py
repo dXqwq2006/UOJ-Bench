@@ -22,7 +22,7 @@ from scripts.run_hack_agent_batch import (
 
 
 SCHEMA_VERSION = 1
-TERMINAL = {"completed", "invalid_candidate", "unavailable_problem"}
+TERMINAL = {"completed", "invalid_candidate", "unavailable_problem", "api_failed"}
 QUOTA_ERROR = "API usage limit exceeded"
 NOT_HACKABLE_ERROR = "This problem is not hackable"
 PYTHON_BLOCK = re.compile(r"```python\n(.*?)```", re.DOTALL)
@@ -149,30 +149,52 @@ def _summary(
 ) -> dict[str, Any]:
     def group(group_samples: list[HackSample]) -> dict[str, Any]:
         ids = {sample.sample_id for sample in group_samples}
+        excluded = {
+            sample_id
+            for sample_id, record in records.items()
+            if sample_id in ids and record.get("status") == "unavailable_problem"
+        }
         available = {
             sample_id
             for sample_id, record in rollout_records.items()
-            if sample_id in ids and record.get("status") == "completed"
+            if sample_id in ids - excluded and record.get("status") == "completed"
         }
-        selected = [record for sample_id, record in records.items() if sample_id in ids]
+        rollout_failed = {
+            sample_id
+            for sample_id, record in rollout_records.items()
+            if sample_id in ids - excluded and record.get("status") == "api_failed"
+        }
+        selected = [
+            record
+            for sample_id, record in records.items()
+            if sample_id in ids - excluded
+        ]
         completed = sum(record.get("status") == "completed" for record in selected)
-        failed = sum(
-            record.get("status") in TERMINAL - {"completed"} for record in selected
+        evaluation_failed = sum(
+            record.get("status")
+            in TERMINAL - {"completed", "unavailable_problem", "api_failed"}
+            for record in selected
         )
+        failed = evaluation_failed + len(rollout_failed)
         retryable = sum(record.get("status") == "retryable_error" for record in selected)
         successes = sum(
             record.get("status") == "completed" and record.get("score") == 1
             for record in selected
         )
         return {
-            "planned": len(group_samples),
+            "planned": len(group_samples) - len(excluded),
+            "original_planned": len(group_samples),
+            "excluded": len(excluded),
             "available": len(available),
             "completed": completed,
             "failed": failed,
             "retryable_error": retryable,
-            "pending_rollout": len(group_samples) - len(available),
-            "pending_evaluation": len(available) - completed - failed,
+            "pending_rollout": (
+                len(group_samples) - len(excluded) - len(available) - len(rollout_failed)
+            ),
+            "pending_evaluation": len(available) - completed - evaluation_failed,
             "successes": successes,
+            "denominator": completed + failed,
             "pass_at_1": (
                 round(successes / (completed + failed), 6)
                 if completed + failed
