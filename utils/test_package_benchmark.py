@@ -601,6 +601,33 @@ def package_metrics(store: Any, *, dataset: str, policy: str) -> dict[str, Any]:
 
     if dataset != "codecontests-plus":
         raise ValueError(f"unsupported package dataset: {dataset}")
+    empty_suite_terminal = {
+        row["problem_id"]
+        for row in store.connection.execute(
+            """
+            SELECT r.problem_id
+            FROM package_runs AS r
+            WHERE r.policy = ?
+              AND (
+                (SELECT COUNT(*) FROM package_tests AS t
+                 WHERE t.policy = r.policy AND t.problem_id = r.problem_id) = 0
+                OR (
+                  (SELECT COUNT(*) FROM package_tests AS t
+                   WHERE t.policy = r.policy AND t.problem_id = r.problem_id)
+                  =
+                  (SELECT COUNT(*) FROM ccplus_candidates AS c
+                   WHERE c.policy = r.policy AND c.problem_id = r.problem_id)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM ccplus_candidates AS c
+                    WHERE c.policy = r.policy AND c.problem_id = r.problem_id
+                      AND c.status = 'validator_accepted'
+                  )
+                )
+              )
+            """,
+            (policy,),
+        )
+    }
     programs = {
         (row["problem_id"], row["submission_id"]): row["submission_type"]
         for row in store.connection.execute(
@@ -651,7 +678,8 @@ def package_metrics(store: Any, *, dataset: str, policy: str) -> dict[str, Any]:
         }
         results = executions.get(key, {})
         correct_preserved += int(
-            all(results.get(index) == "accepted" for index in indices)
+            (bool(indices) or key[0] in empty_suite_terminal)
+            and all(results.get(index) == "accepted" for index in indices)
         )
     curves = _coverage_curves(first_kill, wrong)
     return {

@@ -1328,7 +1328,13 @@ def score(store: RunStore) -> dict[str, Any]:
         if package_mode:
             package_run = store.connection.execute(
                 """
-                SELECT declared_test_count FROM package_runs
+                SELECT declared_test_count,
+                       (
+                           SELECT COUNT(*) FROM package_tests
+                           WHERE policy = package_runs.policy
+                             AND problem_id = package_runs.problem_id
+                       ) AS stored_test_count
+                FROM package_runs
                 WHERE policy = ? AND problem_id = ?
                 """,
                 (policy, problem["problem_id"]),
@@ -1361,6 +1367,24 @@ def score(store: RunStore) -> dict[str, Any]:
             for row in candidates
             if row["valid"] and row["status"] == "complete"
         }
+        candidate_validation_complete = all(
+            row["status"] != "validator_accepted" for row in candidates
+        )
+        if package_mode:
+            empty_suite_terminal = (
+                package_run is not None
+                and (
+                    package_run["stored_test_count"] == 0
+                    or (
+                        len(candidates) == package_run["stored_test_count"]
+                        and candidate_validation_complete
+                    )
+                )
+            )
+        else:
+            empty_suite_terminal = (
+                len(candidates) == budget and candidate_validation_complete
+            )
         execution_rows = list(
             store.connection.execute(
                 """
@@ -1385,7 +1409,7 @@ def score(store: RunStore) -> dict[str, Any]:
 
         def accepts_suite(submission_id: str) -> bool:
             results = by_program.get(submission_id, {})
-            return all(
+            return (bool(valid_ids) or empty_suite_terminal) and all(
                 generation_id in results and _accepted(results[generation_id])
                 for generation_id in valid_ids
             )

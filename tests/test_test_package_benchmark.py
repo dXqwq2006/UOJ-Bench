@@ -264,6 +264,19 @@ class TestPackageBenchmarkTests(unittest.TestCase):
                         ),
                     ),
                 )
+                store.connection.execute(
+                    "INSERT INTO problems VALUES (?, ?, ?)",
+                    (
+                        "q",
+                        "PUBLIC",
+                        json.dumps(
+                            {
+                                "published_true_positive_rate": 1.0,
+                                "published_true_negative_rate": 1.0,
+                            }
+                        ),
+                    ),
+                )
                 store.connection.executemany(
                     "INSERT INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     [
@@ -289,6 +302,28 @@ class TestPackageBenchmarkTests(unittest.TestCase):
                             "WRONG",
                             "{}",
                         ),
+                        (
+                            DATASET_KEY,
+                            "r2",
+                            "q",
+                            "right_submission",
+                            "",
+                            "PY3",
+                            "",
+                            "RIGHT",
+                            "{}",
+                        ),
+                        (
+                            DATASET_KEY,
+                            "w2",
+                            "q",
+                            "wrong_submission",
+                            "",
+                            "PY3",
+                            "",
+                            "WRONG",
+                            "{}",
+                        ),
                     ],
                 )
                 store.connection.executemany(
@@ -296,6 +331,8 @@ class TestPackageBenchmarkTests(unittest.TestCase):
                     [
                         ("r", "python3", "complete", "", "test", time.time()),
                         ("w", "python3", "complete", "", "test", time.time()),
+                        ("r2", "python3", "complete", "", "test", time.time()),
+                        ("w2", "python3", "complete", "", "test", time.time()),
                     ],
                 )
                 store.bind_manifest(
@@ -319,6 +356,13 @@ class TestPackageBenchmarkTests(unittest.TestCase):
                     tests=[],
                     fidelity="adapted",
                 )
+                publish_package(
+                    store,
+                    policy="solver",
+                    problem_id="q",
+                    tests=["pending"],
+                    fidelity="adapted",
+                )
                 store.connection.commit()
                 summary = cc_score(store)
                 metrics = package_metrics(
@@ -330,8 +374,9 @@ class TestPackageBenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["problems"]["p"]["true_positive_rate"], 1.0)
         self.assertEqual(summary["problems"]["p"]["wrong_rejected"], 0)
         self.assertEqual(summary["problems"]["p"]["true_negative_rate"], 0.0)
+        self.assertEqual(summary["problems"]["q"]["correct_accepted"], 0)
         self.assertEqual(metrics["correct_preserved"], 1)
-        self.assertEqual(metrics["correct_preservation_rate"], 1.0)
+        self.assertEqual(metrics["correct_preservation_rate"], 0.5)
         self.assertEqual(metrics["union_coverage"]["killed"], 0)
 
     def test_tce_metrics_use_hidden_jury_and_ordered_union_coverage(self):
