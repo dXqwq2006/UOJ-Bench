@@ -1102,6 +1102,13 @@ def _usage_numbers(value: Any) -> tuple[int, int, int]:
 
 
 def score(store: RunStore) -> dict[str, Any]:
+    manifest = store.manifest()
+    package_contract = manifest.get("test_package_contract")
+    package_policy = (
+        str(package_contract.get("policy"))
+        if isinstance(package_contract, Mapping) and package_contract.get("policy")
+        else None
+    )
     generation_rows = list(
         store.connection.execute(
             """
@@ -1212,6 +1219,13 @@ def score(store: RunStore) -> dict[str, Any]:
                     for generation_id in task1_kills.get(policy, {}).values()
                 )
                 coverage[f"cov@{count}"] = {
+                    "killed": killed,
+                    "total": denominator,
+                    "ratio": killed / denominator,
+                }
+            if policy == package_policy:
+                killed = len(task1_kills.get(policy, {}))
+                coverage["package"] = {
                     "killed": killed,
                     "total": denominator,
                     "ratio": killed / denominator,

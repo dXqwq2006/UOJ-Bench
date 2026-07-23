@@ -302,6 +302,10 @@ class TestPackageBenchmarkTests(unittest.TestCase):
         self.assertEqual(metrics["union_coverage"], metrics["coverage"]["cov@50"])
         self.assertTrue(summary["complete"])
         self.assertEqual(summary["expected"], {"generations": 2, "executions": 4})
+        self.assertEqual(
+            summary["policies"]["solver"]["task1"]["package"],
+            {"killed": 1, "total": 1, "ratio": 1.0},
+        )
 
 
 if __name__ == "__main__":
