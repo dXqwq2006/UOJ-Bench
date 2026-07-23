@@ -651,8 +651,7 @@ def package_metrics(store: Any, *, dataset: str, policy: str) -> dict[str, Any]:
         }
         results = executions.get(key, {})
         correct_preserved += int(
-            bool(indices)
-            and all(results.get(index) == "accepted" for index in indices)
+            all(results.get(index) == "accepted" for index in indices)
         )
     curves = _coverage_curves(first_kill, wrong)
     return {

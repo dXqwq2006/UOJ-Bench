@@ -1385,7 +1385,7 @@ def score(store: RunStore) -> dict[str, Any]:
 
         def accepts_suite(submission_id: str) -> bool:
             results = by_program.get(submission_id, {})
-            return bool(valid_ids) and all(
+            return all(
                 generation_id in results and _accepted(results[generation_id])
                 for generation_id in valid_ids
             )
@@ -1393,7 +1393,7 @@ def score(store: RunStore) -> dict[str, Any]:
         correct_accepted = sum(accepts_suite(value) for value in correct_ids)
         def rejects_suite(submission_id: str) -> bool:
             results = by_program.get(submission_id, {})
-            return bool(valid_ids) and all(
+            return all(
                 generation_id in results for generation_id in valid_ids
             ) and any(
                 not _accepted(results[generation_id])

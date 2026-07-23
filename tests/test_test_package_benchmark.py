@@ -249,6 +249,91 @@ class TestPackageBenchmarkTests(unittest.TestCase):
         self.assertEqual(summary["problems"]["p"]["tests"], 2)
         self.assertEqual(summary["macro"]["true_negative_rate"], 1.0)
 
+    def test_ccplus_empty_package_vacuously_preserves_all_programs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self._store(directory) as store:
+                _create_ccplus_schema(store)
+                store.connection.execute(
+                    "UPDATE problems SET metadata_json = ? WHERE problem_id = 'p'",
+                    (
+                        json.dumps(
+                            {
+                                "published_true_positive_rate": 1.0,
+                                "published_true_negative_rate": 1.0,
+                            }
+                        ),
+                    ),
+                )
+                store.connection.executemany(
+                    "INSERT INTO submissions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                        (
+                            DATASET_KEY,
+                            "r",
+                            "p",
+                            "right_submission",
+                            "",
+                            "PY3",
+                            "",
+                            "RIGHT",
+                            "{}",
+                        ),
+                        (
+                            DATASET_KEY,
+                            "w",
+                            "p",
+                            "wrong_submission",
+                            "",
+                            "PY3",
+                            "",
+                            "WRONG",
+                            "{}",
+                        ),
+                    ],
+                )
+                store.connection.executemany(
+                    "INSERT INTO ccplus_program_audits VALUES (?, ?, ?, ?, ?, ?)",
+                    [
+                        ("r", "python3", "complete", "", "test", time.time()),
+                        ("w", "python3", "complete", "", "test", time.time()),
+                    ],
+                )
+                store.bind_manifest(
+                    {
+                        "benchmark": "codecontests-plus-verified-adapted",
+                        "policies": ["solver"],
+                        "tasks": [1],
+                    }
+                )
+                bind_package_contract(
+                    store,
+                    policy="solver",
+                    dataset="codecontests-plus",
+                    fidelity="adapted",
+                    call_contract="package",
+                )
+                status = publish_package(
+                    store,
+                    policy="solver",
+                    problem_id="p",
+                    tests=[],
+                    fidelity="adapted",
+                )
+                store.connection.commit()
+                summary = cc_score(store)
+                metrics = package_metrics(
+                    store, dataset="codecontests-plus", policy="solver"
+                )
+
+        self.assertEqual(status, "no_valid_tests")
+        self.assertEqual(summary["problems"]["p"]["correct_accepted"], 1)
+        self.assertEqual(summary["problems"]["p"]["true_positive_rate"], 1.0)
+        self.assertEqual(summary["problems"]["p"]["wrong_rejected"], 0)
+        self.assertEqual(summary["problems"]["p"]["true_negative_rate"], 0.0)
+        self.assertEqual(metrics["correct_preserved"], 1)
+        self.assertEqual(metrics["correct_preservation_rate"], 1.0)
+        self.assertEqual(metrics["union_coverage"]["killed"], 0)
+
     def test_tce_metrics_use_hidden_jury_and_ordered_union_coverage(self):
         with tempfile.TemporaryDirectory() as directory:
             with self._store(directory) as store:
